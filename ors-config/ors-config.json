@@ -1,0 +1,44 @@
+{
+    "ors": {
+        "info": {
+            "base_url": "http://localhost:8080/ors",
+            "support_mail": "elicogjunior@gmail.com",
+            "author_tag": "Élio Junior | Amanda Bassani"
+        },
+        "services": {
+            "matrix": {
+                "enabled": true,
+                "maximum_locations": 2000,
+                "maximum_visited_nodes": 200000,
+                "allow_resolve_locations": true,
+                "profiles": "ALL"
+            },
+            "routing": {
+                "enabled": false
+            },
+            "isochrones": {
+                "enabled": false
+            },
+            "snap": {
+                "enabled": false
+            }
+        },
+        "routing": {
+            "init_threads": 2,
+            "profiles": {
+                "active": [
+                    "driving-car"
+                ],
+                "default_params": {
+                    "encoder_flags_size": 8,
+                    "graphs_root_path": "/home/ors/ors-graphs",
+                    "elevation_provider": "local",
+                    "elevation_cache_path": "/home/ors/ors-elevation-cache"
+                },
+                "profile-driving-car": {
+                    "profiles": "driving-car"
+                }
+            }
+        }
+    }
+}

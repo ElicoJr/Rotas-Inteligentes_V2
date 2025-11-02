@@ -8,5 +8,11 @@ services:
       - "3000:3000"
     environment:
       - VROOM_ROUTER=osrm
-      - VROOM_ROUTER_URL=http://host.docker.internal:5000
+      - VROOM_ROUTER_URL=http://osrm:5000
+    networks:
+      - vroom-net
     restart: unless-stopped
+
+networks:
+  vroom-net:
+    external: true

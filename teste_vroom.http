@@ -1,58 +1,6 @@
-### Teste simples de rota com VROOM
-
-POST http://localhost:3000
-Content-Type: application/json
-
-{
-  "vehicles": [
-    {
-      "id": 0,
-      "start": [-63.89, -8.76],
-      "end": [-63.89, -8.76]
-    }
-  ],
-  "jobs": [
-    {
-      "id": 1,
-      "location": [-63.91, -8.74]
-    },
-    {
-      "id": 2,
-      "location": [-63.85, -8.78]
-    }
-  ]
-}
-
-###
-
-POST http://localhost:3000
-Content-Type: application/json
-
-{
-  "vehicles": [
-    {
-      "id": 0,
-      "start": [-63.89, -8.76],
-      "end": [-63.89, -8.76]
-    },
-    {
-      "id": 1,
-      "start": [-63.80, -8.70],
-      "end": [-63.80, -8.70]
-    }
-  ],
-  "jobs": [
-    {
-      "id": 1,
-      "location": [-63.91, -8.74]
-    },
-    {
-      "id": 2,
-      "location": [-63.85, -8.78]
-    },
-    {
-      "id": 3,
-      "location": [-63.82, -8.72]
-    }
-  ]
-}
+curl -X POST "http://localhost:3000" \
+-H "Content-Type: application/json" \
+-d '{
+  "vehicles":[{"id":0,"start":[-63.89,-8.76],"end":[-63.89,-8.76]}],
+  "jobs":[{"id":1,"location":[-63.91,-8.74]},{"id":2,"location":[-63.85,-8.78]}]
+}'

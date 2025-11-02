@@ -1,0 +1,26 @@
+services:
+  osrm:
+    image: osrm/osrm-backend
+    container_name: osrm
+    command: osrm-routed --algorithm mld /data/norte-latest.osrm
+    volumes:
+      - ./osrm-data:/data
+    networks:
+      - vroom-net
+    ports:
+      - "5000:5000"
+
+  vroom:
+    image: vroomvrp/vroom-docker:v1.13.0
+    container_name: vroom
+    environment:
+      VROOM_ROUTER: osrm
+      VROOM_ROUTER_URL: http://osrm:5000
+    networks:
+      - vroom-net
+    ports:
+      - "3000:3000"
+
+networks:
+  vroom-net:
+    driver: bridge

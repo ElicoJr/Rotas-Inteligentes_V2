@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  osrm:
+    image: osrm/osrm-backend
+    container_name: osrm
+    command: osrm-routed --algorithm mld /data/norte-latest.osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../osrm-data:/data
+    restart: unless-stopped

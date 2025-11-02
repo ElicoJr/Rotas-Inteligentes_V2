@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  vroom:
+    image: vroomvrp/vroom-docker:v1.13.0
+    container_name: vroom
+    ports:
+      - "3000:3000"
+    environment:
+      - VROOM_ROUTER=osrm
+      - VROOM_ROUTER_URL=http://host.docker.internal:5000
+    restart: unless-stopped

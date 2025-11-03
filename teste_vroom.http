@@ -1,6 +1,42 @@
-curl -X POST "http://localhost:3000" \
--H "Content-Type: application/json" \
--d '{
-  "vehicles":[{"id":0,"start":[-63.89,-8.76],"end":[-63.89,-8.76]}],
-  "jobs":[{"id":1,"location":[-63.91,-8.74]},{"id":2,"location":[-63.85,-8.78]}]
-}'
+### 🔹 Teste de rota otimizada com VROOM
+POST http://localhost:3000
+Content-Type: application/json
+
+{
+  "vehicles": [
+    {
+      "id": 1,
+      "profile": "car",
+      "start": [-63.9039, -8.7619], 
+      "end": [-61.9442, -10.8800]
+    }
+  ],
+  "jobs": [
+    {
+      "id": 10,
+      "description": "Entrega em Ariquemes",
+      "location": [-63.0408, -9.9135]
+    },
+    {
+      "id": 20,
+      "description": "Entrega em Ji-Paraná",
+      "location": [-61.9442, -10.8800]
+    }
+  ]
+}
+
+### 🔹 Matriz de distâncias e durações (OSRM)
+GET http://localhost:5000/table/v1/car/-63.9039,-8.7619;-63.0408,-9.9135;-61.9442,-10.8800?annotations=distance,duration
+
+### 🔹 Matriz via endpoint do VROOM (se configurado com /matrix)
+POST http://localhost:3000/matrix
+Content-Type: application/json
+
+{
+  "locations": [
+    [-63.9039, -8.7619],
+    [-63.0408, -9.9135],
+    [-61.9442, -10.8800]
+  ],
+  "profile": "car"
+}

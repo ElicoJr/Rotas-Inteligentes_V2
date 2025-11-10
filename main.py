@@ -10,6 +10,7 @@ import time
 import concurrent.futures
 import numpy as np 
 
+# (Função processar_lote SEM ALTERAÇÕES - V14)
 def processar_lote(batch, equipe, tecnicos, comerciais, job_id_to_numos, data_ref, vehicle_id):
     """
     MODIFICADO (V14):
@@ -24,10 +25,8 @@ def processar_lote(batch, equipe, tecnicos, comerciais, job_id_to_numos, data_re
     if vroom_input is None:
         return None
     
-    # --- INÍCIO DA MODIFICAÇÃO (V14) ---
     meta = MetaHeuristica(vroom_input, tecnicos, comerciais, job_id_to_numos, 
                           num_iter=10, equipe_linha=equipe) 
-    # --- FIM DA MODIFICAÇÃO ---
     
     solucao = meta.otimizacao_hibrida()
     
@@ -62,14 +61,28 @@ def processar_lote(batch, equipe, tecnicos, comerciais, job_id_to_numos, data_re
     return None
 
 
+# --- INÍCIO DA MODIFICAÇÃO (V17) ---
+# Definindo o limite máximo de serviços que uma equipe pode ter
+MAX_SERVICOS_POR_EQUIPE = 12
+# --- FIM DA MODIFICAÇÃO ---
+
+# (Função processar_equipe_sequencial ATUALIZADA - V17)
 def processar_equipe_sequencial(equipe_linha, df_tecnicos_pendentes, df_comerciais_pendentes, script_start_time):
-    # (Esta função permanece como na V13)
+    """
+    Processa uma ÚNICA equipe, avaliando TODOS os serviços pendentes.
+    
+    MODIFICADO (V17):
+    - Remove o 'ThreadPool' (V12)
+    - Processa lotes (batches) em SÉRIE (um por um)
+    - Para de processar lotes quando 'MAX_SERVICOS_POR_EQUIPE' (12) é atingido.
+    """
     
     print(f"\n--- Processando equipe {equipe_linha['equipe']} (Início: {equipe_linha['dthaps_ini']}) ---")
     resultados_equipe = []
     tabela_servicos_equipe = []
     data_ref = equipe_linha['dt_ref']
     
+    # 1. Filtra serviços que a equipe pode atender
     tecnicos_aptos, comerciais_aptos = filtrar_servicos(
         df_tecnicos_pendentes, df_comerciais_pendentes, equipe_linha
     )
@@ -78,6 +91,7 @@ def processar_equipe_sequencial(equipe_linha, df_tecnicos_pendentes, df_comercia
         print(f"⚠️ Nenhuma tarefa apta para equipe {equipe_linha['equipe']} (pós-filtro de turno). Pulando.")
         return resultados_equipe, tabela_servicos_equipe
     
+    # 2. Preparar TODOS os jobs aptos
     jobs, job_id_to_numos = preparar_jobs(tecnicos_aptos, comerciais_aptos)
     if not jobs:
         print(f"⚠️ Nenhum job válido (lat/lon) para equipe {equipe_linha['equipe']}. Pulando.")
@@ -85,6 +99,7 @@ def processar_equipe_sequencial(equipe_linha, df_tecnicos_pendentes, df_comercia
     
     print(f"ℹ️  Equipe {equipe_linha['equipe']}: {len(jobs)} jobs aptos (pré-filtro de priorização).")
     
+    # 3. Ordenar os jobs
     def get_start_time(job):
         try:
             return job['time_windows'][0][0]
@@ -94,44 +109,58 @@ def processar_equipe_sequencial(equipe_linha, df_tecnicos_pendentes, df_comercia
     jobs.sort(key=get_start_time) 
     jobs.sort(key=lambda j: j.get('priority', 0), reverse=True)
     
+    # 4. Dividir em lotes
     job_batches = list(chunks(jobs, MAX_JOBS))
     
     print(f"📋 Equipe {equipe_linha['equipe']}: {len(jobs)} jobs aptos, priorizados e divididos em {len(job_batches)} lotes de {MAX_JOBS}.")
 
+    # --- INÍCIO DA MODIFICAÇÃO (V17) ---
+    # 5. Processar lotes em SÉRIE, até atingir o limite
+    
     if not job_batches:
         print(f"⚠️ Nenhum lote criado para {equipe_linha['equipe']}.")
         return resultados_equipe, tabela_servicos_equipe
         
-    print(f"  -> Otimizando todos os {len(job_batches)} lotes para esta equipe...")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [
-            executor.submit(
-                processar_lote, 
-                batch, 
-                equipe_linha, 
-                tecnicos_aptos,
-                comerciais_aptos, 
-                job_id_to_numos, 
-                data_ref, 
-                equipe_linha.name
-            ) for batch in job_batches
-        ]
-
-        for i, future in enumerate(concurrent.futures.as_completed(futures)):
-            result = future.result()
-            
-            if result:
-                resultados_equipe.append({
-                    'equipe': equipe_linha['equipe'],
-                    'data': data_ref,
-                    'solucao': result['solucao']
-                })
-                tabela_servicos_equipe.extend(result['tabela'])
-                print(f"  -> Lote {i+1}/{len(job_batches)} processado. {len(result['tabela'])} serviços atribuídos.")
-            else:
-                print(f"  -> Lote {i+1}/{len(job_batches)} processado. 0 serviços atribuídos (Meta-heurística não encontrou solução viável).")
+    print(f"  -> Otimizando lotes (máx {MAX_SERVICOS_POR_EQUIPE} serviços) para esta equipe...")
     
+    total_servicos_atribuidos_equipe = 0
+
+    # (Removemos o ThreadPoolExecutor)
+    for i, batch in enumerate(job_batches):
+        
+        # Otimiza o lote atual
+        result = processar_lote(
+            batch, 
+            equipe_linha, 
+            tecnicos_aptos,
+            comerciais_aptos, 
+            job_id_to_numos, 
+            data_ref, 
+            equipe_linha.name
+        )
+        
+        if result:
+            servicos_neste_lote = len(result['tabela'])
+            print(f"  -> Lote {i+1}/{len(job_batches)} processado. {servicos_neste_lote} serviços atribuídos.")
+            
+            resultados_equipe.append({
+                'equipe': equipe_linha['equipe'],
+                'data': data_ref,
+                'solucao': result['solucao']
+            })
+            tabela_servicos_equipe.extend(result['tabela'])
+            total_servicos_atribuidos_equipe += servicos_neste_lote
+            
+            # 6. Verifica se atingiu o limite MÁXIMO
+            if total_servicos_atribuidos_equipe >= MAX_SERVICOS_POR_EQUIPE:
+                print(f"  -> Limite de {MAX_SERVICOS_POR_EQUIPE} serviços atingido/ultrapassado. Parando de alocar para esta equipe.")
+                break # Para de processar mais lotes para esta equipe
+                
+        else:
+            print(f"  -> Lote {i+1}/{len(job_batches)} processado. 0 serviços atribuídos (Meta-heurística não encontrou solução viável).")
+    
+    # --- FIM DA MODIFICAÇÃO ---
+
     elapsed_total = time.time() - script_start_time
     print(f"✅ Equipe {equipe_linha['equipe']} concluída. Total de serviços atribuídos: {len(tabela_servicos_equipe)}. (Tempo total: {elapsed_total:.2f}s)")
     

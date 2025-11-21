@@ -63,6 +63,7 @@ def prepare_equipes() -> pd.DataFrame:
 def _prep_tecnicos() -> pd.DataFrame:
     df = _read_parquet_any("atendTec.parquet").copy()
     df.columns = df.columns.str.lower()
+    df = df.drop_duplicates(subset=["numos"])
     ren = {
         "tipo_base":"tipo_base",
         "numos":"numos",
@@ -107,6 +108,8 @@ def _prep_tecnicos() -> pd.DataFrame:
 def _prep_comercial() -> pd.DataFrame:
     df = _read_parquet_any("ServCom.parquet").copy()
     df.columns = df.columns.str.lower()
+    df = df.drop_duplicates(subset=["numos"])
+    df = df[df["data_venc"] >= df["data_sol"]]
 
     ren = {
         "numos":"numos",

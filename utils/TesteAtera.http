@@ -1,0 +1,10 @@
+curl -X POST http://localhost:3000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vehicles": [
+      {"id": 1, "start": [-63.90218, -8.76110], "end": [-63.90218, -8.76110]}
+    ],
+    "jobs": [
+      {"id": 1, "location": [-63.90483, -8.76289]}
+    ]
+  }'

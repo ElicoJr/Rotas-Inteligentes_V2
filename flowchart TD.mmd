@@ -1,27 +1,24 @@
-flowchart TD    
-    A[Início] --> B[Carregar bases de equipes,<br>serviços técnicos e comerciais]
-    B --> C[Filtrar por dia da equipe<br>e datasol < início do turno]
-    C --> D[Calcular score de prioridade<br>(prioridade, tempo_espera, violação)]
-    D --> E[Algoritmo Genético (AG)<br>Seleciona subconjunto inicial de OS]
-    E --> F[Simulated Annealing (SA)<br>Refina subconjunto]
-    F --> G[Ant Colony Optimization (ACO)<br>Intensifica seleção final de OS]
-    G --> H[Montar veículo e jobs<br>para VROOM]
-    H --> I{VROOM respondeu?}
-    I -->|Sim| J[Calcular ETA/ETD pela rota VROOM]
-    I -->|Não| K{OSRM disponível?}
-    K -->|Sim| L[Calcular ETA/ETD com OSRM]
-    K -->|Não| M[Calcular ETA/ETD com Haversine]
-    J --> N[Calcular retorno à base<br>e fim_turno_estimado]
-    L --> N
-    M --> N
-    N --> O[Padronizar layout final<br>com horários, distâncias e equipe]
-    O --> P[Fim]
-    style A fill:#f9f,stroke:#333,stroke-width:4px
-    style P fill:#bbf,stroke:#333,stroke-width:4px
-    classDef decision fill:#ff9,stroke:#333,stroke-width:2px
-    class I,K decision
-    classDef process fill:#9f9,stroke:#333,stroke-width:2px
-    class B,C,D,E,F,G,H,J,L,M,N,O process
-    classDef startend fill:#f9f,stroke:#333,stroke-width:4px
-    class A,P startend
-# End of flowchart TD.mmd
+flowchart TD
+    A[Inicio do processo para a equipe] --> B["`**1. Carregamento dos dados** <BR> Equipes, OS tecnicas e comerciais`"]
+    B --> C["`**2. Filtragem das OS validas**<br>Mesmo dia e datasol menor que inicio do turno`"]
+    C --> D["`**3. Calculo da prioridade**<br>Prioridade, tempo de espera, violacao`"]
+    D --> E["`**4. Metaheuristica Hibrida**<br>AG seleciona subconjunto`"]
+    E --> F["`**5. SA refina solucao**`"]
+    F --> G["`**6. ACO intensifica selecao final**`"]
+    G --> H["`**7. Roteirizacao com VROOM**<br>Envio de jobs e obtencao da rota`"]
+    H --> I{"`**VROOM respondeu?**`"}
+    I -->|Sim| J["`**6. Calculo ETA e ETD pela rota VROOM**`"]
+    I -->|Nao| K["`**Fallback OSRM**`"]
+    K --> L{"`**OSRM respondeu?**`"}
+    L -->|Sim| M["`**ETA e ETD via OSRM**`"]
+    L -->|Nao| N["`**ETA e ETD via Haversine**`"]
+    J --> O["`**7. Calculo do retorno a base**<br>Fim do turno estimado`"]
+    M --> O
+    N --> O
+    O --> P["`**8. Resultado final**<br>OS selecionadas, tempos, distancia e equipe`"]
+    classDef processo Sky stroke-width:2px, stroke-dasharray:none, stroke:#374D7C, fill:#E2EBFF, color:#374D7C;
+    class A,B,C,D,E,F,G,H,J,K,M,N,O,P processo
+    style I fill:#FFF3CD,stroke:#FFEEBA,stroke-width:2px
+    style L fill:#FFF3CD,stroke:#FFEEBA,stroke-width:2px
+    class I,L decisionmaking
+    classDef decisionmaking fill:#FFF3CD,stroke:#FFEEBA,stroke-width:2px

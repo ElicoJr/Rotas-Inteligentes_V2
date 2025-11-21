@@ -1,133 +1,253 @@
-import copy
-from datetime import datetime
-import random
-import numpy as np
-from vroom_interface import chamar_vroom
+# optimization.py
+from __future__ import annotations
+import math
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Dict, List, Tuple
 
-def calcular_penalizacao(linha, tipo_servico, prazo_verificado=None, prazo_regulatorio=None, turno_inicio_dt=None):
-    if tipo_servico == 'tecnico':
-        dh_inicio_falha = linha['DH_INICIO']
-        if turno_inicio_dt:
-            duracao_segundos = (turno_inicio_dt - dh_inicio_falha).total_seconds()
-        else:
-            duracao_segundos = (linha['DH_FINAL'] - dh_inicio_falha).total_seconds()
-        
-        duracao = max(0, duracao_segundos) / 3600
-        eusd = linha['EUSD']
-        return duracao * (eusd / 730) * 34
-    
-    elif tipo_servico == 'comercial':
-        eusd = linha['EUSD']
-        if prazo_regulatorio and prazo_verificado:
-            log_term = np.log(prazo_verificado / prazo_regulatorio) if prazo_verificado > prazo_regulatorio else 0
-            return 120 + 34 * eusd * log_term
-        return 120
+import pandas as pd
+import requests
+
+from vroom_interface import executar_vroom, osrm_table
+
+# Base fixa (lon, lat)
+BASE_LONLAT = (-63.88547754489104, -8.738553348981176)
+
+# tolerância de estouro de HH (+1%)
+OVERRUN_FRAC = 0.01
+
+
+@dataclass
+class Solucao:
+    atendidos: List[Dict]
+    fim_estimado: pd.Timestamp      # chegada na base
+    chegada_base: pd.Timestamp      # igual a fim_estimado
+    vroom_400: bool
+
 
 class MetaHeuristica:
-    def __init__(self, vroom_input_base, tecnicos, comerciais, job_id_to_numos, num_iter=10, equipe_linha=None):
-        self.vroom_input_base = vroom_input_base
-        self.tecnicos = tecnicos
-        self.comerciais = comerciais
-        self.job_id_to_numos = job_id_to_numos
-        self.equipe_linha = equipe_linha
-    
-    def avaliar_solucao(self, solucao_input):
-        """
-        MODIFICADO (V16):
-        - Se 0 jobs forem enviados, cria manualmente uma resposta vazia 
-          em vez de chamar o VROOM (que causa o erro 400).
-        """
-        
-        total_jobs_input = len(solucao_input.get('jobs', []))
-        
-        # --- INÍCIO DA MODIFICAÇÃO (V16) ---
-        if total_jobs_input == 0:
-            # VROOM retorna 400 se chamado com 'jobs: []'.
-            # Criamos manualmente uma resposta JSON vazia e válida.
-            resposta_vazia_manual = {
-                'summary': {'cost': 0, 'unassigned': 0, 'delivery': [0], 'service': 0, 'duration': 0, 'waiting_time': 0},
-                'routes': []
-            }
-            return (0, resposta_vazia_manual)
-        # --- FIM DA MODIFICAÇÃO ---
+    def __init__(
+        self,
+        equipe_row: pd.Series,
+        te_df: pd.DataFrame,
+        co_df: pd.DataFrame,
+        limite_por_equipe: int = 15,
+        return_to_depot: bool = True,
+    ):
+        self.equipe = equipe_row
+        self.te_all = te_df.copy()
+        self.co_all = co_df.copy()
+        self.limite = int(limite_por_equipe)
+        self.return_to_depot = return_to_depot
 
-        resposta = chamar_vroom(solucao_input)
-        
-        if resposta:
-            custo = resposta['summary']['cost']
-            
-            jobs_nao_alocados = resposta['summary'].get('unassigned', 0)
-            
-            # Lógica V10: Se VROOM rejeitou TUDO, é uma falha (inf)
-            if jobs_nao_alocados == total_jobs_input and total_jobs_input > 0:
-                return (float('inf'), None)
-            
-            custo += 1000000 * jobs_nao_alocados
+        self.turno_ini: pd.Timestamp = pd.to_datetime(self.equipe["turno_ini"])
+        self.turno_fim: pd.Timestamp = pd.to_datetime(self.equipe["turno_fim"])
 
-            for route in resposta['routes']:
-                for step in route['steps']:
-                    if step.get('type') == 'job':
-                        job_id = step['job']
-                        arrival_ts = step['arrival']
-                        service_ts = step['service']
-                        numos = self.job_id_to_numos.get(job_id)
-                        if numos is None: continue
-                        
-                        if numos in self.tecnicos['NUMOS'].values:
-                            tipo = 'tecnico'
-                            df_servico = self.tecnicos
-                        elif numos in self.comerciais['NUMOS'].values:
-                            tipo = 'comercial'
-                            df_servico = self.comerciais
-                        else:
-                            continue
-                            
-                        linha = df_servico[df_servico['NUMOS'] == numos].iloc[0]
-                        
-                        if tipo == 'tecnico':
-                            linha = linha.copy()
-                            linha['DH_FINAL'] = datetime.fromtimestamp(arrival_ts + service_ts)
-                            turno_inicio = self.equipe_linha['dthaps_ini'] if self.equipe_linha is not None else None
-                            penal = calcular_penalizacao(linha, tipo, turno_inicio_dt=turno_inicio) 
-                        
-                        elif tipo == 'comercial':
-                            prazo_regulatorio = (linha['DATA_VENC'] - linha['DATA_SOL']).total_seconds() / (3600 * 24)
-                            prazo_verificado = (datetime.fromtimestamp(arrival_ts) - linha['DATA_SOL']).total_seconds() / (3600 * 24)
-                            penal = calcular_penalizacao(linha, tipo, prazo_verificado, prazo_regulatorio)
-                            
-                        custo += penal
-            
-            return (custo, resposta)
-        
-        return (float('inf'), None) 
-    
-    def otimizacao_hibrida(self):
-        """
-        Lógica V10: "Greedy Iterative Reduction"
-        """
-        
-        jobs_priorizados = self.vroom_input_base.get('jobs', [])
-        
-        if not jobs_priorizados:
-            return self.avaliar_solucao(self.vroom_input_base)[1]
+        # HH total disponível (min)
+        hh_total_min = max(0, int((self.turno_fim - self.turno_ini).total_seconds() // 60))
+        self.hh_limite_min = int(hh_total_min * (1 + OVERRUN_FRAC))
 
-        num_jobs_total = len(jobs_priorizados)
-        
-        for num_jobs_tentativa in range(num_jobs_total, 0, -1):
-            
-            input_tentativa = copy.deepcopy(self.vroom_input_base)
-            input_tentativa['jobs'] = jobs_priorizados[:num_jobs_tentativa]
-            
-            custo, resposta = self.avaliar_solucao(input_tentativa)
-            
-            if custo != float('inf'):
-                if resposta and resposta['summary'].get('unassigned', 0) > 0:
-                    print(f"    -> (VROOM rejeitou {resposta['summary']['unassigned']} desses {num_jobs_tentativa} jobs de entrada)")
-                return resposta 
+        self.base = BASE_LONLAT
+        self.vroom_400_flag = False
+
+        # filtrar só o que está disponível até o INÍCIO DO TURNO
+        self.te = self.te_all[self.te_all["data_sol"] <= self.turno_ini].copy()
+        self.co = self.co_all[self.co_all["data_sol"] <= self.turno_ini].copy()
+
+    # ---------- utilidades ----------
+    @staticmethod
+    def _haversine_minutes(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+        # 1 grau ~ 111km; velocidade média ~ 40 km/h => min = dist/40*60
+        (lon1, lat1), (lon2, lat2) = a, b
+        R = 6371.0
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        x = math.sin(dlat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlon / 2) ** 2
+        d = 2 * R * math.asin(math.sqrt(x))
+        return (d / 40.0) * 60.0
+
+    def _dur_matrix_minutes(self, coords: List[Tuple[float, float]]) -> List[List[float]]:
+        try:
+            resp = osrm_table(coords)
+            if not resp or resp.get("durations") is None:
+                raise RuntimeError("OSRM sem durations")
+            # OSRM em segundos -> minutos
+            return [[(c if c is not None else 0.0) / 60.0 for c in row] for row in resp["durations"]]
+        except Exception:
+            # fallback haversine
+            n = len(coords)
+            M = [[0.0] * n for _ in range(n)]
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        M[i][j] = self._haversine_minutes(coords[i], coords[j])
+            return M
+
+    def _ordenar_por_prioridade(self) -> pd.DataFrame:
+        co = self.co.copy()
+        te = self.te.copy()
+
+        co["tem_prazo"] = co["data_venc"].notna()
+        co["vencida"] = co["tem_prazo"] & (co["data_venc"] < self.turno_ini)
+
+        co_ok = co[co["tem_prazo"] & ~co["vencida"]].copy()
+        co_venc = co[co["vencida"]].copy()
+        te_ok = te.copy()
+
+        # ordenação
+        co_ok = co_ok.sort_values(by=["data_venc", "eusd", "data_sol"], ascending=[True, False, True])
+
+        # melhorar a ordenação das vencidas
+        te_ok = te_ok.sort_values(by=["eusd", "data_sol"], ascending=[False, True])
+        co_venc = co_venc.sort_values(by=["data_venc", "eusd", "data_sol"], ascending=[True, False, True])
+
+
+        return pd.concat([co_ok, co_venc, te_ok], ignore_index=True)
+
+    # ---------- solver ----------
+    def otimizar_para_equipe(self) -> Solucao:
+        candidatos = self._ordenar_por_prioridade()
+
+        selecionados: List[Dict] = []
+        times_fim: List[pd.Timestamp] = []
+
+        # posição atual é a base
+        atual = self.base
+        tempo_total_min = 0
+
+        while len(selecionados) < self.limite and not candidatos.empty:
+            melhor_i = None
+            melhor_custo = float("inf")
+
+            for i, row in candidatos.iterrows():
+                if pd.isna(row["latitude"]) or pd.isna(row["longitude"]):
+                    continue
+                alvo = (float(row["longitude"]), float(row["latitude"]))
+
+                M = self._dur_matrix_minutes([atual, alvo, self.base])
+                desloc = M[0][1]               # atual -> alvo
+                volta = M[1][2] if self.return_to_depot else 0.0
+
+                te_min = int(row["te"])
+                td_min = int(row.get("td") or 0)
+                custo_servico = te_min + td_min
+
+                novo_total = tempo_total_min + desloc + custo_servico + volta
+                if novo_total <= self.hh_limite_min:
+                    # leve bônus para comerciais no prazo (puxar antes de vencer)
+                    penal = 0.0
+                    if row["tipo"] == "comercial" and pd.notna(row["data_venc"]) and row["data_venc"] >= self.turno_ini:
+                        penal = -1.0
+                    custo = desloc + penal
+                    if custo < melhor_custo:
+                        melhor_custo = custo
+                        melhor_i = i
+
+            if melhor_i is None:
+                break
+
+            job = candidatos.loc[melhor_i]
+            alvo = (float(job["longitude"]), float(job["latitude"]))
+            M = self._dur_matrix_minutes([atual, alvo, self.base])
+            desloc = M[0][1]
+            volta = M[1][2] if self.return_to_depot else 0.0
+            te_min = int(job["te"])
+            td_min = int(job.get("td") or 0)
+            custo_servico = te_min + td_min
+
+            # início e fim deste serviço
+            inicio_job = self.turno_ini + timedelta(minutes=tempo_total_min + desloc)
+            fim_job = inicio_job + timedelta(minutes=custo_servico)
+
+            selecionados.append(job.to_dict())
+            times_fim.append(fim_job)
+
+            tempo_total_min += desloc + custo_servico
+            atual = alvo
+            candidatos = candidatos.drop(index=melhor_i)
+
+        # Se nada foi selecionado mas há candidatos, tentar VROOM (pode salvar)
+        if not selecionados and not self._ordenar_por_prioridade().empty:
+            jobs = []
+            for _, r in self._ordenar_por_prioridade().head(self.limite).iterrows():
+                if pd.isna(r["latitude"]) or pd.isna(r["longitude"]):
+                    continue
+                jobs.append(
+                    {
+                        "id": int(r["numos"]),
+                        "location": [float(r["longitude"]), float(r["latitude"])],
+                        "service": int(max(0, int(r["te"])) * 60),  # segundos
+                    }
+                )
+            steps = []
+            try:
+                steps = executar_vroom(start=self.base, end=(self.base if self.return_to_depot else None), jobs=jobs)
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 400:
+                    self.vroom_400_flag = True
+                    print("❌ VROOM 400 Bad Request — fallback guloso ativado.")
+                else:
+                    sc = e.response.status_code if e.response is not None else "?"
+                    print(f"❌ VROOM HTTPError (status {sc}) — fallback guloso ativado.")
+                steps = []
+            except Exception as e:
+                print(f"❌ VROOM falhou ({type(e).__name__}) — fallback guloso ativado.")
+                steps = []
+
+            if steps:
+                # construir fim_job sequencial simples (sem tempos de deslocamento intra-steps)
+                t_cursor = self.turno_ini
+                selecionados = []
+                times_fim = []
+                # mapear job->linha
+                pool = self._ordenar_por_prioridade()
+                for st in steps:
+                    if st.get("type") != "job":
+                        continue
+                    jid = int(st["job"])
+                    row = pool[pool["numos"].astype("int64") == jid]
+                    if row.empty:
+                        continue
+                    r = row.iloc[0].to_dict()
+                    te_min = int(max(0, int(r["te"])))
+                    fim = t_cursor + timedelta(minutes=te_min)
+                    selecionados.append(r)
+                    times_fim.append(fim)
+                    t_cursor = fim
+
+        # calcular chegada à base
+        if selecionados:
+            ultimo_fim = max(times_fim)
+            if self.return_to_depot:
+                M = self._dur_matrix_minutes([(float(selecionados[-1]["longitude"]), float(selecionados[-1]["latitude"])), self.base])
+                back = M[0][1] if M and len(M[0]) > 1 else self._haversine_minutes(
+                    (float(selecionados[-1]["longitude"]), float(selecionados[-1]["latitude"])), self.base
+                )
             else:
-                pass 
-                
-        # (V16) Se o loop falhar (N=1), chama avaliar_solucao com 0 jobs, 
-        # que agora retorna a 'resposta_vazia_manual' em vez de erro.
-        vazio_input = {**self.vroom_input_base, 'jobs': []}
-        return self.avaliar_solucao(vazio_input)[1]
+                back = 0.0
+            chegada_base = ultimo_fim + timedelta(minutes=back)
+        else:
+            chegada_base = self.turno_ini
+
+        # montar saída
+        out = []
+        for r, fim in zip(selecionados, times_fim):
+            out.append(
+                {
+                    "equipe": self.equipe["equipe"],
+                    "numos": int(r["numos"]),
+                    "tipo": r["tipo"],
+                    "codserv": r["codserv"],
+                    "data_sol": r["data_sol"],
+                    "data_venc": r["data_venc"],
+                    "latitude": r["latitude"],
+                    "longitude": r["longitude"],
+                    "te": int(r["te"]),
+                    "td": int(r.get("td") or 0),
+                    "fim_os": pd.Timestamp(fim),
+                }
+            )
+
+        fim_estimado = pd.Timestamp(chegada_base)
+        return Solucao(atendidos=out, fim_estimado=fim_estimado, chegada_base=fim_estimado, vroom_400=self.vroom_400_flag)

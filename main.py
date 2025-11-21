@@ -1,289 +1,140 @@
-import multiprocessing as mp
-from data_loader import load_data, prepare_columns
-from vroom_interface import (
-    filtrar_servicos, preparar_jobs, preparar_vroom_input,
-    chamar_vroom, chunks, MAX_JOBS, validar_e_limpar_lote
-)
-from optimization import MetaHeuristica
+# main.py
+from __future__ import annotations
+import os
+from typing import List, Dict, Tuple
+
 import pandas as pd
-import time
-import concurrent.futures
-import numpy as np 
 
-# (Função processar_lote SEM ALTERAÇÕES - V14)
-def processar_lote(batch, equipe, tecnicos, comerciais, job_id_to_numos, data_ref, vehicle_id):
-    """
-    MODIFICADO (V14):
-    - Passa a 'equipe' (equipe_linha) para a MetaHeuristica 
-      para o cálculo de penalidade.
-    """
-    batch = validar_e_limpar_lote(batch)
-    if not batch:
-        return None
-    
-    vroom_input = preparar_vroom_input(equipe, batch, data_ref, vehicle_id)
-    if vroom_input is None:
-        return None
-    
-    meta = MetaHeuristica(vroom_input, tecnicos, comerciais, job_id_to_numos, 
-                          num_iter=10, equipe_linha=equipe) 
-    
-    solucao = meta.otimizacao_hibrida()
-    
-    if solucao:
-        tabela_servicos = []
-        for route in solucao['routes']:
-            for step in route['steps']:
-                if step.get('type') == 'job':
-                    job_id = step['job']
-                    arrival_ts = step['arrival']
-                    service_time = step['service']
-                    numos = job_id_to_numos[job_id]
-                    if numos in tecnicos['NUMOS'].values:
-                        tipo = 'tecnico'
-                        df_servico = tecnicos
-                    elif numos in comerciais['NUMOS'].values:
-                        tipo = 'comercial'
-                        df_servico = comerciais
-                    else:
-                        continue
-                    linha = df_servico[df_servico['NUMOS'] == numos].iloc[0]
-                    tabela_servicos.append({
-                        'equipe': equipe['equipe'],
-                        'data': data_ref,
-                        'numos': numos,
-                        'tipo': tipo,
-                        'inicio': arrival_ts,
-                        'fim': arrival_ts + service_time
-                    })
-        return {'solucao': solucao, 'tabela': tabela_servicos}
-    
-    return None
+from data_loader import prepare_equipes, prepare_pendencias
+from optimization import MetaHeuristica, Solucao
 
 
-# --- INÍCIO DA MODIFICAÇÃO (V17) ---
-# Definindo o limite máximo de serviços que uma equipe pode ter
-MAX_SERVICOS_POR_EQUIPE = 12
-# --- FIM DA MODIFICAÇÃO ---
+RESULTS_DIR = "results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# (Função processar_equipe_sequencial ATUALIZADA - V17)
-def processar_equipe_sequencial(equipe_linha, df_tecnicos_pendentes, df_comerciais_pendentes, script_start_time):
+
+def _pendentes_para_equipe(te_all: pd.DataFrame, co_all: pd.DataFrame, turno_ini: pd.Timestamp) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Processa uma ÚNICA equipe, avaliando TODOS os serviços pendentes.
-    
-    MODIFICADO (V17):
-    - Remove o 'ThreadPool' (V12)
-    - Processa lotes (batches) em SÉRIE (um por um)
-    - Para de processar lotes quando 'MAX_SERVICOS_POR_EQUIPE' (12) é atingido.
+    Filtra pendências cujo data_sol <= turno_ini da equipe.
     """
-    
-    print(f"\n--- Processando equipe {equipe_linha['equipe']} (Início: {equipe_linha['dthaps_ini']}) ---")
-    resultados_equipe = []
-    tabela_servicos_equipe = []
-    data_ref = equipe_linha['dt_ref']
-    
-    # 1. Filtra serviços que a equipe pode atender
-    tecnicos_aptos, comerciais_aptos = filtrar_servicos(
-        df_tecnicos_pendentes, df_comerciais_pendentes, equipe_linha
+    te_ok = te_all[te_all["data_sol"] <= turno_ini].copy()
+    co_ok = co_all[co_all["data_sol"] <= turno_ini].copy()
+    return te_ok, co_ok
+
+
+def simular(
+    df_eq_raw: pd.DataFrame,
+    df_te_raw: pd.DataFrame,
+    df_co_raw: pd.DataFrame,
+    *,
+    limite_por_equipe: int = 15,
+    return_to_depot: bool = True,
+    descartar_co_vencido_antes_da_solicitacao: bool = True,
+) -> None:
+    # normalizações
+    equipes = prepare_equipes(df_eq_raw)
+    pend_te, pend_co = prepare_pendencias(
+        df_te_raw, df_co_raw, descartar_comerciais_vencidos_antes_da_solicitacao=descartar_co_vencido_antes_da_solicitacao
     )
-    
-    if tecnicos_aptos.empty and comerciais_aptos.empty:
-        print(f"⚠️ Nenhuma tarefa apta para equipe {equipe_linha['equipe']} (pós-filtro de turno). Pulando.")
-        return resultados_equipe, tabela_servicos_equipe
-    
-    # 2. Preparar TODOS os jobs aptos
-    jobs, job_id_to_numos = preparar_jobs(tecnicos_aptos, comerciais_aptos)
-    if not jobs:
-        print(f"⚠️ Nenhum job válido (lat/lon) para equipe {equipe_linha['equipe']}. Pulando.")
-        return resultados_equipe, tabela_servicos_equipe
-    
-    print(f"ℹ️  Equipe {equipe_linha['equipe']}: {len(jobs)} jobs aptos (pré-filtro de priorização).")
-    
-    # 3. Ordenar os jobs
-    def get_start_time(job):
-        try:
-            return job['time_windows'][0][0]
-        except (IndexError, KeyError, TypeError):
-            return float('inf')
-            
-    jobs.sort(key=get_start_time) 
-    jobs.sort(key=lambda j: j.get('priority', 0), reverse=True)
-    
-    # 4. Dividir em lotes
-    job_batches = list(chunks(jobs, MAX_JOBS))
-    
-    print(f"📋 Equipe {equipe_linha['equipe']}: {len(jobs)} jobs aptos, priorizados e divididos em {len(job_batches)} lotes de {MAX_JOBS}.")
 
-    # --- INÍCIO DA MODIFICAÇÃO (V17) ---
-    # 5. Processar lotes em SÉRIE, até atingir o limite
-    
-    if not job_batches:
-        print(f"⚠️ Nenhum lote criado para {equipe_linha['equipe']}.")
-        return resultados_equipe, tabela_servicos_equipe
-        
-    print(f"  -> Otimizando lotes (máx {MAX_SERVICOS_POR_EQUIPE} serviços) para esta equipe...")
-    
-    total_servicos_atribuidos_equipe = 0
+    # Simulação por dia
+    dias = sorted(equipes["dt_ref"].dropna().unique())
+    registros: List[Dict] = []
 
-    # (Removemos o ThreadPoolExecutor)
-    for i, batch in enumerate(job_batches):
-        
-        # Otimiza o lote atual
-        result = processar_lote(
-            batch, 
-            equipe_linha, 
-            tecnicos_aptos,
-            comerciais_aptos, 
-            job_id_to_numos, 
-            data_ref, 
-            equipe_linha.name
-        )
-        
-        if result:
-            servicos_neste_lote = len(result['tabela'])
-            print(f"  -> Lote {i+1}/{len(job_batches)} processado. {servicos_neste_lote} serviços atribuídos.")
-            
-            resultados_equipe.append({
-                'equipe': equipe_linha['equipe'],
-                'data': data_ref,
-                'solucao': result['solucao']
-            })
-            tabela_servicos_equipe.extend(result['tabela'])
-            total_servicos_atribuidos_equipe += servicos_neste_lote
-            
-            # 6. Verifica se atingiu o limite MÁXIMO
-            if total_servicos_atribuidos_equipe >= MAX_SERVICOS_POR_EQUIPE:
-                print(f"  -> Limite de {MAX_SERVICOS_POR_EQUIPE} serviços atingido/ultrapassado. Parando de alocar para esta equipe.")
-                break # Para de processar mais lotes para esta equipe
-                
-        else:
-            print(f"  -> Lote {i+1}/{len(job_batches)} processado. 0 serviços atribuídos (Meta-heurística não encontrou solução viável).")
-    
-    # --- FIM DA MODIFICAÇÃO ---
+    print("\n====================================================================================================\n")
+    for dia in dias:
+        dia = pd.to_datetime(dia)
+        print(f"🗓️  Processando dia: {dia}")
 
-    elapsed_total = time.time() - script_start_time
-    print(f"✅ Equipe {equipe_linha['equipe']} concluída. Total de serviços atribuídos: {len(tabela_servicos_equipe)}. (Tempo total: {elapsed_total:.2f}s)")
-    
-    return resultados_equipe, tabela_servicos_equipe
+        eq_dia = equipes[equipes["turno_ini"].dt.normalize() == dia].copy()
+        eq_dia = eq_dia.sort_values("turno_ini")
+        print(f"👥 Equipes no dia: {len(eq_dia)}")
 
-if __name__ == '__main__':
-    # (O loop principal permanece como na V13)
-    start_time = time.time()
-    print("🚀 Iniciando script de roteirização (Simulação Sequencial por Bloco de Início)...")
-    
-    df_equipes_full, df_tecnicos_full, df_comerciais_full = load_data()
-    df_equipes_full, df_tecnicos_full, df_comerciais_full = prepare_columns(
-        df_equipes_full, df_tecnicos_full, df_comerciais_full
-    )
-    print("DataFrames completos carregados.")
+        vroom400_count = 0
+        atribuicoes_dia = 0
+        atrib_te = 0
+        atrib_co = 0
 
-    datas_simulacao = sorted(df_equipes_full['dt_ref'].dt.date.unique())
-    print(f"📅 Simulação de {datas_simulacao[0]} até {datas_simulacao[-1]}.")
+        for _, equipe in eq_dia.iterrows():
+            # pendentes elegíveis neste momento (data_sol <= início do turno)
+            te_ok, co_ok = _pendentes_para_equipe(pend_te, pend_co, equipe["turno_ini"])
 
-    servicos_atribuidos_numos = set()
-    todos_resultados_finais = []
-    toda_tabela_servicos_finais = []
+            pend_tec_count = len(te_ok)
+            pend_com_count = len(co_ok)
 
-    n_dias_total = len(datas_simulacao)
-    for dia_idx, dia_simulacao in enumerate(datas_simulacao):
-        print("\n========================================================")
-        print(f"☀️ Processando dia: {dia_simulacao} ({dia_idx + 1} de {n_dias_total})")
-        print("========================================================")
-        dia_sim_start_time = time.time()
+            mh = MetaHeuristica(
+                equipe_row=equipe,
+                te_df=te_ok,
+                co_df=co_ok,
+                limite_por_equipe=limite_por_equipe,
+                return_to_depot=return_to_depot,
+            )
+            sol: Solucao = mh.otimizar_para_equipe()
 
-        equipes_do_dia_full = df_equipes_full[
-            (df_equipes_full['dt_ref'].dt.date == dia_simulacao) &
-            (pd.notna(df_equipes_full['dthaps_ini']))
-        ].copy()
-        
-        if equipes_do_dia_full.empty:
-            print("... Nenhuma equipe trabalhando neste dia. Pulando.")
-            continue
+            # remover do pool global os que foram atendidos
+            atendidos_ids = [r["numos"] for r in sol.atendidos]
+            if atendidos_ids:
+                pend_te = pend_te[~pend_te["numos"].astype("int64").isin(atendidos_ids)]
+                pend_co = pend_co[~pend_co["numos"].astype("int64").isin(atendidos_ids)]
 
-        df_tecnicos_pendentes = df_tecnicos_full[
-            (df_tecnicos_full['DH_INICIO'].dt.date <= dia_simulacao) &
-            (~df_tecnicos_full['NUMOS'].isin(servicos_atribuidos_numos))
-        ].copy()
-        
-        df_comerciais_pendentes = df_comerciais_full[
-            (df_comerciais_full['DATA_SOL'].dt.date <= dia_simulacao) &
-            (~df_comerciais_full['NUMOS'].isin(servicos_atribuidos_numos))
-        ].copy()
-        
-        if df_tecnicos_pendentes.empty and df_comerciais_pendentes.empty:
-            print("... Nenhum serviço pendente para este dia. Pulando.")
-            continue
-            
-        print(f"🔄 {len(equipes_do_dia_full)} equipes encontradas | {len(df_tecnicos_pendentes)} téc. pendentes | {len(df_comerciais_pendentes)} com. pendentes")
+            n_tec = sum(1 for r in sol.atendidos if r["tipo"] == "tecnico")
+            n_com = sum(1 for r in sol.atendidos if r["tipo"] == "comercial")
+            atribuicoes_dia += (n_tec + n_com)
+            atrib_te += n_tec
+            atrib_co += n_com
+            vroom400_count += (1 if sol.vroom_400 else 0)
 
-        horarios_inicio_distintos = sorted(equipes_do_dia_full['dthaps_ini'].unique())
-        
-        n_blocos = len(horarios_inicio_distintos)
-        qtd_blocosProcessados = 0
-        print(f"   (Agrupadas em {n_blocos} blocos de início distintos)")
-        
-        servicos_atribuidos_hoje_set = set()
-
-        for horario_inicio_bloco in horarios_inicio_distintos:
-            
-            qtd_blocosProcessados += 1
-            
-            equipes_do_bloco = equipes_do_dia_full[
-                equipes_do_dia_full['dthaps_ini'] == horario_inicio_bloco
-            ]
-            
-            equipes_do_bloco_shuffled = equipes_do_bloco.sample(frac=1)
-            
-            print(f"\n--- Processando Bloco {qtd_blocosProcessados}/{n_blocos} (Início: {horario_inicio_bloco}, {len(equipes_do_bloco_shuffled)} equipes) ---")
-
-            for idx, equipe_linha in equipes_do_bloco_shuffled.iterrows():
-                
-                resultados_equipe, tabela_servicos_equipe = processar_equipe_sequencial(
-                    equipe_linha, 
-                    df_tecnicos_pendentes, 
-                    df_comerciais_pendentes,
-                    start_time 
+            # logging da equipe
+            if sol.atendidos:
+                print(
+                    f"🚚 Equipe: {equipe['equipe']:<8} | 🕒 Inicio: {equipe['turno_ini']} | 🕒 Fim: {equipe['turno_fim']} "
+                    f"| Pendentes agora: Tec={pend_tec_count} | Com={pend_com_count} "
+                    f"| ✅ Atribuídos: {n_tec + n_com} (Tec={n_tec} | Com={n_com}) | 🕒 Fim estimado: {sol.fim_estimado}"
                 )
+            else:
+                if sol.vroom_400:
+                    print(f"⚠️  {equipe['equipe']}: Nenhuma OS atribuída (VROOM 400 — usado fallback, nada viável dentro do HH).")
+                else:
+                    print(f"⚠️  {equipe['equipe']}: Nenhuma OS atribuída")
 
-                if tabela_servicos_equipe:
-                    todos_resultados_finais.extend(resultados_equipe)
-                    toda_tabela_servicos_finais.extend(tabela_servicos_equipe)
-                    
-                    numos_atribuidos_agora = {item['numos'] for item in tabela_servicos_equipe}
-                    servicos_atribuidos_hoje_set.update(numos_atribuidos_agora)
-                    
-                    df_tecnicos_pendentes = df_tecnicos_pendentes[
-                        ~df_tecnicos_pendentes['NUMOS'].isin(numos_atribuidos_agora)
-                    ]
-                    df_comerciais_pendentes = df_comerciais_pendentes[
-                        ~df_comerciais_pendentes['NUMOS'].isin(numos_atribuidos_agora)
-                    ]
-                    
-                    print(f"... {len(df_tecnicos_pendentes)} téc. restantes | {len(df_comerciais_pendentes)} com. restantes para o próximo.")
-            
-        servicos_atribuidos_numos.update(servicos_atribuidos_hoje_set)
-        
-        dia_sim_elapsed = time.time() - dia_sim_start_time
-        print(f"\n✅ Dia {dia_simulacao} concluído. {len(servicos_atribuidos_hoje_set)} jobs atribuídos hoje. Tempo: {dia_sim_elapsed:.2f}s")
-        print(f"📈 Total de serviços atribuídos na simulação: {len(servicos_atribuidos_numos)}")
+            # acumula registros finais
+            registros.extend(sol.atendidos)
 
-    print("\n🎉 Simulação sequencial (por bloco de início) concluída!")
-    elapsed_total = time.time() - start_time
+        # resumo do dia
+        pend_tec_total = len(pend_te)
+        pend_com_total = len(pend_co)
+        print("-" * 100)
+        print(f"📊 RESUMO DO DIA {dia.date()}")
+        print(f"   ✔ Serviços Atribuídos hoje     : {atribuicoes_dia}")
+        print(f"     ↳ Técnicos                   : {atrib_te}")
+        print(f"     ↳ Comerciais                 : {atrib_co}")
+        if vroom400_count:
+            print(f"   ❗ Ocorrências de VROOM 400     : {vroom400_count}")
+        print(f"   🔁 Pendentes para o próximo dia: {pend_tec_total + pend_com_total} (Tec={pend_tec_total} | Com={pend_com_total})")
+        print("-" * 100)
+        print("\n====================================================================================================\n")
 
-    if toda_tabela_servicos_finais:
-        resultados_df = pd.DataFrame(todos_resultados_finais)
-        tabela_servicos_df = pd.DataFrame(toda_tabela_servicos_finais)
-        
-        print("📊 Resultados finais consolidados:")
-        print(tabela_servicos_df.head(5))
-        
-        import os
-        os.makedirs('results', exist_ok=True)
-        
-        resultados_df.to_parquet('results/resultados_simulacao_sequencial.parquet', index=False, engine='pyarrow')
-        tabela_servicos_df.to_parquet('results/tabela_servicos_simulacao_sequencial.parquet', index=False, engine='pyarrow')
-        print("💾 Resultados salvos em 'results/'.")
+    # salvar resultado final
+    if registros:
+        df_out = pd.DataFrame(registros)
+        out_path = os.path.join(RESULTS_DIR, "atribuicoes.parquet")
+        df_out.to_parquet(out_path, index=False)
+        print(f"📄 Arquivo gerado: {out_path}")
     else:
-        print("⚠️ Nenhum serviço foi atribuído durante toda a simulação.")
-    
-    print(f"🎉 Script concluído! Tempo total: {elapsed_total:.2f}s.")
+        print("⚠️ Nenhuma atribuição realizada. Verifique filtros e dados.")
+
+
+if __name__ == "__main__":
+    # Carrega as fontes originais
+    df_eq = pd.read_parquet("data/equipes.parquet")
+    df_te = pd.read_parquet("data/atendTec.parquet")
+    df_co = pd.read_parquet("data/ServCom.parquet")
+
+    simular(
+        df_eq,
+        df_te,
+        df_co,
+        limite_por_equipe=15,
+        return_to_depot=True,
+        descartar_co_vencido_antes_da_solicitacao=True,
+    )

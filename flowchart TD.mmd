@@ -1,0 +1,27 @@
+flowchart TD    
+    A[Início] --> B[Carregar bases de equipes,<br>serviços técnicos e comerciais]
+    B --> C[Filtrar por dia da equipe<br>e datasol < início do turno]
+    C --> D[Calcular score de prioridade<br>(prioridade, tempo_espera, violação)]
+    D --> E[Algoritmo Genético (AG)<br>Seleciona subconjunto inicial de OS]
+    E --> F[Simulated Annealing (SA)<br>Refina subconjunto]
+    F --> G[Ant Colony Optimization (ACO)<br>Intensifica seleção final de OS]
+    G --> H[Montar veículo e jobs<br>para VROOM]
+    H --> I{VROOM respondeu?}
+    I -->|Sim| J[Calcular ETA/ETD pela rota VROOM]
+    I -->|Não| K{OSRM disponível?}
+    K -->|Sim| L[Calcular ETA/ETD com OSRM]
+    K -->|Não| M[Calcular ETA/ETD com Haversine]
+    J --> N[Calcular retorno à base<br>e fim_turno_estimado]
+    L --> N
+    M --> N
+    N --> O[Padronizar layout final<br>com horários, distâncias e equipe]
+    O --> P[Fim]
+    style A fill:#f9f,stroke:#333,stroke-width:4px
+    style P fill:#bbf,stroke:#333,stroke-width:4px
+    classDef decision fill:#ff9,stroke:#333,stroke-width:2px
+    class I,K decision
+    classDef process fill:#9f9,stroke:#333,stroke-width:2px
+    class B,C,D,E,F,G,H,J,L,M,N,O process
+    classDef startend fill:#f9f,stroke:#333,stroke-width:4px
+    class A,P startend
+# End of flowchart TD.mmd

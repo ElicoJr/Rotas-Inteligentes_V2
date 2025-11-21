@@ -1,0 +1,551 @@
+### MATRIZ DE ROTA SEM GEOMETRY + CALCULÁVEL (para velocidade)
+POST http://localhost:3000
+Content-Type: application/json
+
+{
+  "vehicles": [
+    {
+      "id": 1,
+      "profile": "car",
+      "start": [-63.9039, -8.7619]
+    }
+  ],
+  "jobs": [
+    {
+      "id": 10,
+      "description": "Entrega em Ariquemes",
+      "location": [-63.0408, -9.9135]
+    },
+    {
+      "id": 20,
+      "description": "Entrega em Ji-Paraná",
+      "location": [-61.9442, -10.8800]
+    }
+  ],
+  "options": {
+    "g": false,
+    "use_matrices": true
+  }
+}
+
+
+
+### 🔹 Teste de rota otimizada com VROOM
+POST http://localhost:3000
+Content-Type: application/json
+
+{
+    "vehicles": [
+      {
+        "id": 1,
+        "profile": "car",
+        "start": [-63.90218, -8.76110],
+        "end": [-61.9442, -10.8800]
+      }
+    ],
+    "jobs": [
+      {
+        "id": 10,
+        "description": "Entrega em Ariquemes",
+        "location": [-63.0408, -9.9135]
+      },
+      {
+        "id": 20,
+        "description": "Entrega em Ji-Paraná",
+        "location": [-61.9442, -10.8800]
+      }
+    ]
+  }
+
+### 🔹 Matriz de distâncias e durações (OSRM)
+GET http://localhost:5000/table/v1/car/-63.9039,-8.7619;-63.0408,-9.9135;-61.9442,-10.8800?annotations=distance,duration
+
+### 🔹 Matriz via endpoint do VROOM (se configurado com /matrix)
+POST http://localhost:3000
+Content-Type: application/json
+
+{
+  "locations": [
+    [-63.9039, -8.7619],
+    [-63.0408, -9.9135],
+    [-61.9442, -10.8800]
+  ],
+  "profile": "car"
+}
+
+### Teste de rota com restrições de tempo e capacidade
+POST http://localhost:3000
+Content-Type: application/json
+
+{
+    "vehicles": [
+        {
+            "id": 0,
+            "description": "Equipe DB-PVHRG02",
+            "start": [
+                -63.88547754489104,
+                -8.738553348981176
+            ],
+            "end": [
+                -63.88547754489104,
+                -8.738553348981176
+            ],
+            "time_window": [
+                1675238472,
+                1675274201
+            ],
+            "capacity": [
+                1
+            ],
+            "skills": [
+                1
+            ],
+            "breaks": [
+                {
+                    "id": 1000,
+                    "time_windows": [
+                        [
+                            1675256328,
+                            1675259928
+                        ]
+                    ],
+                    "service": 0
+                }
+            ]
+        }
+    ],
+    "jobs": [
+        {
+            "id": 1,
+            "description": "tec_20220000366006",
+            "location": [
+                -63.87244603929958,
+                -8.817345450718376
+            ],
+            "service": 19200,
+            "time_windows": [
+                [
+                    1672756380,
+                    1672842780
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 2,
+            "description": "tec_20230000000001",
+            "location": [
+                -63.84296444621689,
+                -8.771354474456661
+            ],
+            "service": 13524120,
+            "time_windows": [
+                [
+                    1672532520,
+                    1672618920
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 3,
+            "description": "tec_20230000000006",
+            "location": [
+                -63.869459259298836,
+                -8.80068858250492
+            ],
+            "service": 1620,
+            "time_windows": [
+                [
+                    1672536772,
+                    1672623172
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 4,
+            "description": "tec_20230000000011",
+            "location": [
+                -63.900465191764575,
+                -8.797080889679311
+            ],
+            "service": 1620,
+            "time_windows": [
+                [
+                    1672537794,
+                    1672624194
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 5,
+            "description": "tec_20230000000013",
+            "location": [
+                -64.29291579937862,
+                -9.12853374004856
+            ],
+            "service": 3840,
+            "time_windows": [
+                [
+                    1672538026,
+                    1672624426
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 6,
+            "description": "tec_20230000000015",
+            "location": [
+                -63.85410121017843,
+                -8.734493598684807
+            ],
+            "service": 2160,
+            "time_windows": [
+                [
+                    1672539570,
+                    1672625970
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 7,
+            "description": "tec_20230000000038",
+            "location": [
+                -63.73601580013452,
+                -8.801055719073101
+            ],
+            "service": 780,
+            "time_windows": [
+                [
+                    1672565700,
+                    1672652100
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 8,
+            "description": "tec_20230000000053",
+            "location": [
+                -63.84108179087657,
+                -8.776080320726294
+            ],
+            "service": 840,
+            "time_windows": [
+                [
+                    1672551409,
+                    1672637809
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 9,
+            "description": "tec_20230000000061",
+            "location": [
+                -63.877722641174415,
+                -8.806105402914598
+            ],
+            "service": 1620,
+            "time_windows": [
+                [
+                    1672549860,
+                    1672636260
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 10,
+            "description": "tec_20230000000177",
+            "location": [
+                -63.80119405055709,
+                -8.77808974034861
+            ],
+            "service": 2100,
+            "time_windows": [
+                [
+                    1672564560,
+                    1672650960
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 11,
+            "description": "tec_20230000000223",
+            "location": [
+                -63.858147606998834,
+                -8.774759391959417
+            ],
+            "service": 13440,
+            "time_windows": [
+                [
+                    1672578060,
+                    1672664460
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 12,
+            "description": "tec_20230000000226",
+            "location": [
+                -63.90404229584371,
+                -8.775232503756975
+            ],
+            "service": 2580,
+            "time_windows": [
+                [
+                    1672576766,
+                    1672663166
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 13,
+            "description": "tec_20230000000228",
+            "location": [
+                -63.83300965154643,
+                -8.77599538754786
+            ],
+            "service": 10980,
+            "time_windows": [
+                [
+                    1672581720,
+                    1672668120
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 14,
+            "description": "tec_20230000000230",
+            "location": [
+                -63.7841790645452,
+                -8.773054021332921
+            ],
+            "service": 1680,
+            "time_windows": [
+                [
+                    1672583880,
+                    1672670280
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 15,
+            "description": "tec_20230000000270",
+            "location": [
+                -63.84176929808301,
+                -8.760696934434465
+            ],
+            "service": 3960,
+            "time_windows": [
+                [
+                    1672572900,
+                    1672659300
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 16,
+            "description": "tec_20230000000278",
+            "location": [
+                -64.24342339407109,
+                -9.185102249686944
+            ],
+            "service": 3540,
+            "time_windows": [
+                [
+                    1672573860,
+                    1672660260
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 17,
+            "description": "tec_20230000000300",
+            "location": [
+                -63.88309322021309,
+                -8.733600642155306
+            ],
+            "service": 9000,
+            "time_windows": [
+                [
+                    1672586212,
+                    1672672612
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 18,
+            "description": "tec_20230000000326",
+            "location": [
+                -63.83488344496296,
+                -8.772912213770304
+            ],
+            "service": 300,
+            "time_windows": [
+                [
+                    1672579416,
+                    1672665816
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 19,
+            "description": "tec_20230000000343",
+            "location": [
+                -63.8361643881974,
+                -8.798126640034555
+            ],
+            "service": 0,
+            "time_windows": [
+                [
+                    1672581740,
+                    1672668140
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 20,
+            "description": "tec_20230000000345",
+            "location": [
+                -63.911923112973774,
+                -8.749737930719366
+            ],
+            "service": 6840,
+            "time_windows": [
+                [
+                    1672582080,
+                    1672668480
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 21,
+            "description": "tec_20230000000364",
+            "location": [
+                -63.91108289504036,
+                -8.74859560208235
+            ],
+            "service": 5160,
+            "time_windows": [
+                [
+                    1672584692,
+                    1672671092
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 22,
+            "description": "tec_20230000000375",
+            "location": [
+                -63.83295211722656,
+                -8.79388346709209
+            ],
+            "service": 2640,
+            "time_windows": [
+                [
+                    1672587363,
+                    1672673763
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 23,
+            "description": "tec_20230000000397",
+            "location": [
+                -63.83378637780025,
+                -8.762068823319165
+            ],
+            "service": 2940,
+            "time_windows": [
+                [
+                    1672599720,
+                    1672686120
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 24,
+            "description": "tec_20230000000424",
+            "location": [
+                -63.835802691896006,
+                -8.798040138751535
+            ],
+            "service": 1140,
+            "time_windows": [
+                [
+                    1672588920,
+                    1672675320
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 25,
+            "description": "tec_20230000000427",
+            "location": [
+                -63.913154449586045,
+                -8.725718046147302
+            ],
+            "service": 1680,
+            "time_windows": [
+                [
+                    1672589308,
+                    1672675708
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 26,
+            "description": "tec_20230000000433",
+            "location": [
+                -63.78136768882028,
+                -8.800241984679122
+            ],
+            "service": 2700,
+            "time_windows": [
+                [
+                    1672587375,
+                    1672673775
+                ]
+            ],
+            "priority": 10
+        },
+        {
+            "id": 27,
+            "description": "tec_20230000000435",
+            "location": [
+                -63.91855717080926,
+                -8.73541041932964
+            ],
+            "service": 0,
+            "time_windows": [
+                [
+                    1672590540,
+                    1672676940
+                ]
+            ],
+            "priority": 10
+        }
+    ], 
+}

@@ -1,4 +1,21 @@
 # v4/main.py
+"""
+V4 - Otimização Multi-Veículo com Restrições de Capacidade
+
+NOVIDADES:
+- Usa VROOM multi-veículos para otimização global por grupo de turno
+- Adiciona restrições de capacidade para equilibrar distribuição:
+  * Cada veículo tem capacity=[limite_por_equipe]
+  * Cada job tem delivery=[1]
+  * Garante que nenhuma equipe pegue mais que o limite
+  * Força distribuição espacial mais equilibrada
+  * Reduz cruzamentos de rotas naturalmente
+
+BENEFÍCIOS:
+- Mais serviços atendidos (todas as equipes trabalham)
+- Menos cruzamentos entre rotas
+- Distribuição equilibrada de carga
+"""
 import sys
 import os
 import argparse

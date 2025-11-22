@@ -1,5 +1,10 @@
-# v3 package for enhanced routing simulation
+# v3/__init__.py
+
+from .optimization import MetaHeuristicaV3
+from .data_loader import prepare_equipes_v3, prepare_pendencias_v3
 
 __all__ = [
-    "data_loader_v3",
+    "MetaHeuristicaV3",
+    "prepare_equipes_v3",
+    "prepare_pendencias_v3",
 ]

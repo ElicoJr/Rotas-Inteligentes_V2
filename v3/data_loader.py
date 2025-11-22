@@ -1,3 +1,4 @@
+# v3/data_loader.py
 from pathlib import Path
 import pandas as pd
 
@@ -8,7 +9,7 @@ DATA_DIRS = [Path("data"), Path("/data")]
 
 
 def prepare_equipes_v3() -> pd.DataFrame:
-    """Carrega Equipes.parquet mantendo também as colunas de pausa.
+    """Carrega Equipes.parquet mantendo colunas de pausa e base da equipe.
 
     Campos principais padronizados:
     - tip_equipe
@@ -20,6 +21,7 @@ def prepare_equipes_v3() -> pd.DataFrame:
     - fim_turno    (DATA_FIM_TURNO)
     - dthpausa_ini
     - dthpausa_fim
+    - base_lon, base_lat (base específica da equipe)
     """
     df = _read_parquet_any("Equipes.parquet").copy()
     df.columns = df.columns.str.lower()
@@ -36,6 +38,9 @@ def prepare_equipes_v3() -> pd.DataFrame:
         "dthaps_fim_ajustado": "dthaps_fim_ajustado",
         "dthpausa_ini": "dthpausa_ini",
         "dthpausa_fim": "dthpausa_fim",
+        # Se suas colunas de base tiverem outros nomes, mapeie aqui:
+        # "x_base": "base_lon",
+        # "y_base": "base_lat",
     }
     df = df.rename(columns=rename)
 
@@ -63,7 +68,12 @@ def prepare_equipes_v3() -> pd.DataFrame:
     df["fim_turno"] = pd.to_datetime(df.get("data_fim_turno"), errors="coerce")
     df["nome"] = df["nome"].astype(str)
 
-    # descartar quaisquer coordenadas em equipes
+    # garantir base_lon/base_lat como numérico, se existirem
+    for c in ("base_lon", "base_lat"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # descartar coordenadas irrelevantes de equipes (mas manter base_lon/base_lat)
     for col in ("longitude", "latitude", "lon", "lat", "nox", "noy", "x", "y"):
         if col in df.columns:
             df.drop(columns=[col], inplace=True)
@@ -78,6 +88,8 @@ def prepare_equipes_v3() -> pd.DataFrame:
         "fim_turno",
         "dthpausa_ini",
         "dthpausa_fim",
+        "base_lon",
+        "base_lat",
     ]
     keep = [c for c in keep if c in df.columns]
     return df[keep].copy()

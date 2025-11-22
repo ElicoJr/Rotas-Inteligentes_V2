@@ -1,5 +1,7 @@
+# v2/osrm_client.py
 import requests
 from v2 import config
+
 
 class OSRMClient:
     def __init__(self, base_url: str = None, profile: str = "driving", timeout: int = 30):
@@ -30,6 +32,26 @@ class OSRMClient:
         legs_dur = []
         legs_dist = []
         for i in range(n - 1):
-            legs_dur.append(float(dur[i][i+1]) if dur and dur[i][i+1] is not None else 0.0)
-            legs_dist.append(float(dist[i][i+1]) if dist and dist[i][i+1] is not None else 0.0)
+            legs_dur.append(float(dur[i][i + 1]) if dur and dur[i][i + 1] is not None else 0.0)
+            legs_dist.append(float(dist[i][i + 1]) if dist and dist[i][i + 1] is not None else 0.0)
         return legs_dur, legs_dist
+
+    def nearest(self, lon: float, lat: float):
+        """
+        Usa o endpoint /nearest do OSRM para 'snapar' um ponto à via mais próxima.
+        Retorna (lon_corrigido, lat_corrigida). Se falhar, devolve o original.
+        """
+        url = f"{self.base_url}/nearest/v1/{self.profile}/{lon},{lat}?number=1"
+        try:
+            r = requests.get(url, timeout=self.timeout)
+            r.raise_for_status()
+            data = r.json()
+            waypoints = data.get("waypoints") or []
+            if waypoints:
+                loc = waypoints[0].get("location")
+                if loc and len(loc) == 2:
+                    # OSRM retorna [lon, lat]
+                    return float(loc[0]), float(loc[1])
+        except Exception:
+            pass
+        return float(lon), float(lat)

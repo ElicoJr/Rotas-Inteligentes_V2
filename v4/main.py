@@ -205,7 +205,11 @@ def _solve_group_vroom(
             lat = float(row["latitude"])
         except Exception:
             continue
-        te_min = float(row.get("TE", 0) or 0.0)
+        te_raw = row.get("TE", 0)
+        if pd.isna(te_raw):
+            te_min = 0.0
+        else:
+            te_min = float(te_raw)
         service_sec = max(int(te_min * 60), 0)
         jobs.append(
             {

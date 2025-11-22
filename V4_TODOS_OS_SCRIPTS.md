@@ -1,3 +1,105 @@
+# V4 - Todos os Scripts para Ajuste
+
+## 📁 Estrutura de Arquivos
+
+```
+v4/
+├── __init__.py
+├── config.py
+├── data_loader.py
+└── main.py
+
+v2/
+└── vroom_client.py (atualizado)
+```
+
+---
+
+## 1️⃣ v4/__init__.py
+
+```python
+# v4/__init__.py
+
+from .main import main
+
+__all__ = ["main"]
+```
+
+---
+
+## 2️⃣ v4/config.py
+
+```python
+# v4/config.py
+"""
+Configurações ajustáveis do V4 para otimização de performance
+"""
+
+# === LIMITES DE PAYLOAD VROOM ===
+# Limite absoluto de jobs por chamada ao VROOM (evita erro 500)
+# Definido como suficientemente alto para não limitar artificialmente
+MAX_JOBS_ABSOLUTO = 300
+
+# Fator multiplicador para pré-seleção de candidatos
+# Formula: max_jobs_por_veiculo = limite_por_equipe × FATOR_POOL
+# Com FATOR_POOL=2 e limite=15: cada veículo recebe até 30 candidatos
+FATOR_POOL = 2
+
+# Máximo de equipes por sub-grupo (evita payloads muito grandes)
+# Grupos maiores são divididos automaticamente
+# Com 4 equipes × 30 jobs/equipe = 120 jobs por sub-grupo
+MAX_EQUIPES_POR_SUBGRUPO = 4
+
+# === THRESHOLDS DE LOGGING ===
+# Exibe warning quando pool de candidatos é maior que este valor
+POOL_WARNING_THRESHOLD = 80
+
+# === AJUSTES RECOMENDADOS POR CENÁRIO ===
+"""
+CENÁRIO 1: Poucos serviços, muitas equipes
+- MAX_JOBS_ABSOLUTO = 100
+- FATOR_POOL = 2
+- MAX_EQUIPES_POR_SUBGRUPO = 4
+
+CENÁRIO 2: Muitos serviços, poucas equipes  
+- MAX_JOBS_ABSOLUTO = 200
+- FATOR_POOL = 4
+- MAX_EQUIPES_POR_SUBGRUPO = 8
+
+CENÁRIO 3: Backlog muito grande (>1000 pendências)
+- MAX_JOBS_ABSOLUTO = 100  # Reduzir
+- FATOR_POOL = 2           # Reduzir
+- MAX_EQUIPES_POR_SUBGRUPO = 4  # Reduzir
+
+CENÁRIO 4: Performance máxima (VROOM potente)
+- MAX_JOBS_ABSOLUTO = 300
+- FATOR_POOL = 5
+- MAX_EQUIPES_POR_SUBGRUPO = 10
+"""
+```
+
+---
+
+## 3️⃣ v4/data_loader.py
+
+```python
+# v4/data_loader.py
+"""
+V4 reutiliza os mesmos loaders do V3, que por sua vez usam v2.data_loader.
+"""
+
+from v3.data_loader import prepare_equipes_v3, prepare_pendencias_v3
+
+__all__ = ["prepare_equipes_v3", "prepare_pendencias_v3"]
+```
+
+---
+
+## 4️⃣ v4/main.py
+
+**ARQUIVO COMPLETO - 581 LINHAS**
+
+```python
 # v4/main.py
 """
 V4 - Otimização Multi-Veículo com Restrições de Capacidade
@@ -298,11 +400,6 @@ def _solve_group_vroom_single(
 
     if not jobs:
         return pd.DataFrame(), set()
-    
-    # Validação: se muito poucos jobs para os veículos, pular
-    if len(jobs) < v4_config.MIN_JOBS_POR_GRUPO:
-        log(f"   ⏭️  Pulando: apenas {len(jobs)} job(s) para {n_veic} veículos (mínimo: {v4_config.MIN_JOBS_POR_GRUPO})")
-        return pd.DataFrame(), set()
 
     # Monta veículos VROOM com capacidade limitada
     vehicles = []
@@ -583,3 +680,77 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+```
+
+---
+
+## 5️⃣ v2/vroom_client.py (ATUALIZADO)
+
+```python
+import json
+import requests
+from v2 import config
+
+class VroomClient:
+    def __init__(self, base_url: str = None, timeout: int = 30):
+        self.base_url = base_url or config.VROOM_URL
+        self.timeout = timeout
+
+    def _post(self, payload: dict):
+        url = f"{self.base_url}"
+        if not url.endswith("/"):
+            url += "/"
+        headers = {"Content-Type": "application/json"}
+        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    def route(self, vehicle: dict, jobs: list):
+        """
+        Chama o endpoint VROOM para um único veículo + lista de jobs.
+        Mantido para compatibilidade com V2/V3.
+        """
+        payload = {
+            "vehicles": [vehicle],
+            "jobs": jobs,
+            "options": {"g": False},
+        }
+        return self._post(payload)
+
+    def route_multi(self, vehicles: list, jobs: list):
+        """
+        Chama o endpoint VROOM para múltiplos veículos (multi-veículos) + lista de jobs.
+        Usado pelo V4.
+        """
+        payload = {
+            "vehicles": vehicles,
+            "jobs": jobs,
+            "options": {"g": False},
+        }
+        return self._post(payload)
+```
+
+---
+
+## 📝 Notas Importantes
+
+1. **Arquivos Pequenos:** `__init__.py` e `data_loader.py` são simples
+2. **Arquivo Principal:** `main.py` tem 581 linhas - toda a lógica V4
+3. **Configurações:** `config.py` é onde você ajusta os parâmetros
+4. **Cliente VROOM:** `vroom_client.py` foi atualizado com método `route_multi()`
+
+## 🔧 Como Usar
+
+1. **Copie todos os arquivos** para seu repositório local
+2. **Ajuste `v4/config.py`** conforme necessário
+3. **Execute:** `python -m v4.main --limite 15 --debug`
+
+## 📊 Configuração Atual (Recomendada)
+
+```python
+MAX_JOBS_ABSOLUTO = 300
+FATOR_POOL = 2
+MAX_EQUIPES_POR_SUBGRUPO = 4
+```
+
+Isso resulta em **~30 jobs por veículo**, ideal para evitar erro 500.

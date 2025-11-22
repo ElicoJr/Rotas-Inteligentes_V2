@@ -274,11 +274,19 @@ def _solve_group_vroom(
         vehicles.append(vehicle)
         veh_id_to_nome[v_id] = str(erow["nome"])
 
+    # Log de debug do payload
+    log(f"   📤 Enviando ao VROOM: {len(vehicles)} veículos × {len(jobs)} jobs (cap={limite_por_equipe} cada)")
+    
     vc = VroomClient()
     try:
         resp = vc.route_multi(vehicles, jobs)
     except Exception as e:
-        log(f"💥 Falha VROOM multi-veículos para grupo {group_ini}: {e}")
+        error_msg = str(e)
+        if "500" in error_msg:
+            log(f"💥 VROOM sobrecarga (500): {len(vehicles)} veículos, {len(jobs)} jobs - Payload muito grande!")
+            log(f"   💡 Sugestão: Reduza --limite ou ajuste max_jobs_absoluto no código")
+        else:
+            log(f"💥 Falha VROOM multi-veículos para grupo {group_ini}: {e}")
         return pd.DataFrame(), set()
 
     routes = resp.get("routes", [])

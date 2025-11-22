@@ -1,8 +1,6 @@
-# v2/vroom_client.py
 import json
 import requests
 from v2 import config
-
 
 class VroomClient:
     def __init__(self, base_url: str = None, timeout: int = 30):

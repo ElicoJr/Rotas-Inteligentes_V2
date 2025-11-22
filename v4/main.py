@@ -34,10 +34,8 @@ from v4 import config as v4_config
 from v2.vroom_client import VroomClient
 from v2 import config
 
-
 RESULTS_DIR = Path("results_v4")
 RESULTS_DIR.mkdir(exist_ok=True)
-
 
 REQUIRED_COLS = [
     "tipo_serv",
@@ -63,10 +61,8 @@ REQUIRED_COLS = [
     "chegada_base",
 ]
 
-
 def log(msg: str) -> None:
     print(msg, flush=True)
-
 
 def _ensure_result_schema(df: pd.DataFrame) -> pd.DataFrame:
     for c in REQUIRED_COLS:

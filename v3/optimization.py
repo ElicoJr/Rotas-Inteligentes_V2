@@ -45,36 +45,17 @@ class MetaHeuristicaV3:
 
     # ---------------- PRIORIDADE (score) ----------------
     def _score_base(self, row: pd.Series) -> float:
-        """
-        Score de prioridade combinando:
-        - OS comercial:
-            * mais prioridade quanto mais próxima do vencimento ou já vencida (dataven)
-            * mais prioridade quanto maior o EUSD
-        - OS técnica:
-            * mais prioridade quanto mais tempo pendente (datasol -> inicio_turno)
-            * mais prioridade quanto maior o EUSD
-
-        Também aproveita, se existirem, colunas pré-calculadas:
-        - prioridade
-        - tempo_espera
-        - violacao
-        """
         tipo = (row.get("tipo_serv") or row.get("tipo") or "").strip().lower()
 
-        # tempo_espera (se já existir no dataframe)
         tempo_espera = float(row.get("tempo_espera", 0) or 0)
 
-        # valor de EUSD (tanto faz se vier como EUSD, eusd, EUSD_FIO_B)
         eusd_raw = row.get("EUSD", row.get("eusd", row.get("EUSD_FIO_B", 0)))
         try:
             eusd = float(eusd_raw or 0.0)
         except Exception:
             eusd = 0.0
-
-        # normalização simples para não explodir o score (log(1 + EUSD))
         eusd_score = math.log1p(eusd) if eusd > 0 else 0.0
 
-        # tempo pendente em dias até o início do turno
         tempo_pendente_dias = 0.0
         datasol = row.get("datasol") or row.get("data_sol")
         if datasol is not None:
@@ -87,7 +68,6 @@ class MetaHeuristicaV3:
             except Exception:
                 tempo_pendente_dias = 0.0
 
-        # urgência por vencimento (somente comerciais)
         urg_venc = 0.0
         if tipo == "comercial":
             dataven = row.get("dataven") or row.get("data_venc")
@@ -96,21 +76,17 @@ class MetaHeuristicaV3:
                     dv = pd.to_datetime(dataven, errors="coerce")
                     if pd.notna(dv) and pd.notna(self.turno_ini):
                         dias_para_venc = (dv - self.turno_ini).total_seconds() / 86400.0
-                        # queremos mais score quanto mais próxima de vencer (dias_para_venc pequeno ou negativo)
                         urg_venc = -dias_para_venc
                 except Exception:
                     urg_venc = 0.0
 
-        # peso de prioridade/violação pré-existentes, se houverem
         prioridade_base = float(row.get("prioridade", 1) or 1)
         violacao = float(row.get("violacao", 0) or 0)
 
-        # Ponderação final (ajustável):
-        # Comerciais: priorizam vencimento + EUSD, técnicos: tempo pendente + EUSD
         if tipo == "comercial":
             score = (
                 1.0 * prioridade_base
-                + 3.0 * urg_venc       # urgência por vencimento
+                + 3.0 * urg_venc
                 + 0.5 * tempo_pendente_dias
                 + 1.0 * eusd_score
                 - 0.5 * violacao
@@ -123,7 +99,6 @@ class MetaHeuristicaV3:
                 - 0.5 * violacao
             )
         else:
-            # tipo indefinido: usa um mix suave
             score = (
                 1.0 * prioridade_base
                 + 1.0 * tempo_pendente_dias
@@ -131,7 +106,6 @@ class MetaHeuristicaV3:
                 - 0.5 * violacao
             )
 
-        # também mistura tempo_espera se existir (em minutos)
         score += 0.001 * tempo_espera
 
         return float(score)
@@ -143,7 +117,6 @@ class MetaHeuristicaV3:
         if k <= 0:
             return []
 
-        # caso trivial: escolher apenas 1 índice (evita randint(1,0))
         if k == 1:
             if n == 0:
                 return []
@@ -224,7 +197,6 @@ class MetaHeuristicaV3:
         best_sol = []
         best_fit = -1e9
 
-        # reforça solução do SA, se existir
         if sol_sa_idx:
             base_fit = score_subset(sol_sa_idx)
             if base_fit > best_fit:
@@ -234,11 +206,10 @@ class MetaHeuristicaV3:
                     pher[i] += base_fit / 10.0
 
         for _ in range(iters):
-            # garante feromônios sempre positivos
             pher = np.nan_to_num(pher, nan=0.0)
             min_pher = pher.min()
             if min_pher <= 0:
-                pher = pher - min_pher + 1e-6  # shift para ficar > 0
+                pher = pher - min_pher + 1e-6  # > 0
 
             total = pher.sum()
             if not np.isfinite(total) or total <= 0:
@@ -305,7 +276,6 @@ class MetaHeuristicaV3:
             route = resp["routes"][0]
             steps = route.get("steps", [])
 
-            # mapa job_id -> arrival (segundos)
             eta_map = {}
             end_arrival_s = None
             for st in steps:
@@ -325,21 +295,50 @@ class MetaHeuristicaV3:
                     df_jobs_tagged["job_id_vroom"].map(eta_map).astype("datetime64[ns]")
                 )
 
-            # termino = chegada + TE (segundos)
             te_sec = df_jobs_tagged.apply(_service_seconds_from_row, axis=1)
             mask_eta = df_jobs_tagged["dth_chegada_estimada"].notna()
             df_jobs_tagged.loc[mask_eta, "dth_final_estimada"] = pd.to_datetime(
                 df_jobs_tagged.loc[mask_eta, "dth_chegada_estimada"], errors="coerce"
             ) + pd.to_timedelta(te_sec[mask_eta].values, unit="s")
 
-            # chegada à base pela arrival do 'end'
             if end_arrival_s is not None:
                 df_jobs_tagged["fim_turno_estimado"] = t0 + pd.to_timedelta(end_arrival_s, unit="s")
 
-            # marca todos como VROOM
-            df_jobs_tagged["eta_source"] = "VROOM"
-            df_jobs_tagged["eta_source"] = df_jobs_tagged["eta_source"].astype("string")
+            # Se algum job ficou sem chegada (NaT), refazemos TODAS as ETAs via OSRM/Haversine
+            if df_jobs_tagged["dth_chegada_estimada"].isna().any():
+                pausa_ini = (
+                    pd.to_datetime(self.equipe.get("dthpausa_ini"), errors="coerce")
+                    if "dthpausa_ini" in self.equipe.index
+                    else pd.NaT
+                )
+                pausa_fim = (
+                    pd.to_datetime(self.equipe.get("dthpausa_fim"), errors="coerce")
+                    if "dthpausa_fim" in self.equipe.index
+                    else pd.NaT
+                )
+                try:
+                    df_jobs_tagged = _osrm_eta_etd(
+                        self.osrm,
+                        df_jobs_tagged,
+                        self.turno_ini,
+                        lon_e,
+                        lat_e,
+                        pausa_ini=pausa_ini,
+                        pausa_fim=pausa_fim,
+                    )
+                except Exception:
+                    df_jobs_tagged = _haversine_eta_etd(
+                        df_jobs_tagged,
+                        self.turno_ini,
+                        lon_e,
+                        lat_e,
+                        pausa_ini=pausa_ini,
+                        pausa_fim=pausa_fim,
+                    )
+            else:
+                df_jobs_tagged["eta_source"] = "VROOM"
 
+            df_jobs_tagged["eta_source"] = df_jobs_tagged["eta_source"].astype("string")
             return resp, df_jobs_tagged
 
         # pausa da equipe (usada no fallback)
@@ -382,8 +381,6 @@ class MetaHeuristicaV3:
         if self.pool_base.empty:
             return None
 
-        # Agora NÃO filtramos mais por dt_ref == dia: queremos permitir backlog de dias anteriores,
-        # desde que datasol < inicio_turno (feito a seguir).
         pool = self.pool_base.reset_index(drop=True)
 
         elig = pd.to_datetime(pool.get("datasol", pd.NaT), errors="coerce")
@@ -397,21 +394,12 @@ class MetaHeuristicaV3:
 
         if len(pool) > max_pool:
             pool = pool.copy()
-            # flag se é comercial
             pool["__is_com"] = (pool["tipo_serv"] == "comercial").astype(int)
-            # datas
             pool["__datasol"] = pd.to_datetime(pool["datasol"], errors="coerce")
             pool["__dataven"] = pd.to_datetime(pool.get("dataven", pd.NaT), errors="coerce")
-
-            # EUSD normalizado
             eusd_col = pool.get("EUSD", pool.get("eusd", pool.get("EUSD_FIO_B", 0)))
             pool["__eusd"] = pd.to_numeric(eusd_col, errors="coerce").fillna(0.0)
 
-            # Comerciais primeiro, ordenando por:
-            # - é comercial desc
-            # - dataven asc (mais urgente primeiro)
-            # - datasol asc (mais antiga primeiro)
-            # - EUSD desc (mais valor primeiro)
             pool = pool.sort_values(
                 by=["__is_com", "__dataven", "__datasol", "__eusd"],
                 ascending=[False, True, True, False],
@@ -421,10 +409,8 @@ class MetaHeuristicaV3:
                        .reset_index(drop=True)
         # ====== FIM DO PRÉ-FILTRO ======
 
-        # -------- PRIORIZAÇÃO: AG → SA → ACO --------
         k = self.limite_por_equipe
 
-        # atalho: se poucas OS, não rodar meta-heurística pesada
         if len(pool) <= k:
             cand_aco = pool.copy()
         else:
@@ -435,7 +421,6 @@ class MetaHeuristicaV3:
         if cand_aco.empty:
             return None
 
-        # -------- ETA/ETD com VROOM/OSRM/Haversine --------
         resp, cand = self._vroom(cand_aco)
 
         if resp and resp.get("routes"):
@@ -443,7 +428,6 @@ class MetaHeuristicaV3:
             cand["distancia_vroom"] = r0.get("distance")
             cand["duracao_vroom"] = r0.get("duration")
 
-        # metadados da equipe
         cand["equipe"] = self.equipe.get("nome", "N/D")
         for meta_col in [
             "dthaps_ini",
@@ -456,7 +440,6 @@ class MetaHeuristicaV3:
             if meta_col in self.equipe.index:
                 cand[meta_col] = self.equipe[meta_col]
 
-        # base da equipe em cada linha
         cand["base_lon"] = self.base_lon
         cand["base_lat"] = self.base_lat
 
@@ -465,6 +448,7 @@ class MetaHeuristicaV3:
 
 
 # ===== Helpers ETA/ETD =====
+
 def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
     t = pd.to_datetime(t_cursor, errors="coerce")
     try:

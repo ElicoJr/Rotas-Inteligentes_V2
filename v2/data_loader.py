@@ -1,165 +1,218 @@
+# v2/data_loader.py
 from pathlib import Path
+from typing import Optional, Sequence
+
+import numpy as np
 import pandas as pd
 
-DATA_DIRS = [Path("data"), Path("/data")]
+
+# Diretórios padrão para busca dos .parquet
+DATA_DIRS: Sequence[Path] = (Path("data"), Path("/data"), Path("."))
+
 
 def _read_parquet_any(name: str) -> pd.DataFrame:
-    for d in DATA_DIRS:
-        p = d / name
+    """
+    Procura um arquivo parquet com o nome dado em data/, /data e .,
+    carrega e normaliza valores infinitos para NA.
+
+    Substitui o antigo uso de:
+        with pd.option_context("mode.use_inf_as_na", True):
+            pd.read_parquet(...)
+    que gerava FutureWarning.
+    """
+    for base in DATA_DIRS:
+        p = base / name
         if p.exists():
-            return pd.read_parquet(p)
-    raise FileNotFoundError(f"Arquivo não encontrado: {name} em {DATA_DIRS}")
+            df = pd.read_parquet(p)
+            # converte inf/-inf para NA explicitamente
+            df.replace([np.inf, -np.inf], pd.NA, inplace=True)
+            return df
+    raise FileNotFoundError(f"Não encontrei {name} em {', '.join(str(d) for d in DATA_DIRS)}")
 
-def prepare_equipes() -> pd.DataFrame:
-    # Equipes.parquet (maiúsculas)
-    df = _read_parquet_any("Equipes.parquet").copy()
-    # normalizar nomes
-    df.columns = df.columns.str.lower()
-
-    # mapeamentos esperados
-    rename = {
-        "tip_equipe": "tip_equipe",
-        "equipe": "nome",
-        "dt_ref": "dt_ref",
-        "dthaps_ini": "dthaps_ini",
-        "dthaps_fim": "dthaps_fim",
-        "data_inicio_turno": "data_inicio_turno",
-        "data_fim_turno": "data_fim_turno",
-        "dthaps_fim_ajustado": "dthaps_fim_ajustado",
-        "dthpausa_ini": "dthpausa_ini",
-        "dthpausa_fim": "dthpausa_fim",
-    }
-    df = df.rename(columns=rename)
-
-    # datas
-    for c in ["dthaps_ini","dthaps_fim","data_inicio_turno","data_fim_turno",
-              "dthaps_fim_ajustado","dthpausa_ini","dthpausa_fim"]:
-        if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce")
-
-    # dt_ref como date -> datetime normalizado
-    if "dt_ref" in df.columns:
-        df["dt_ref"] = pd.to_datetime(df["dt_ref"], errors="coerce").dt.normalize()
-    else:
-        # fallback: pelo início de turno
-        df["dt_ref"] = pd.to_datetime(df["data_inicio_turno"], errors="coerce").dt.normalize()
-
-    # chaves de turno consolidadas
-    df["inicio_turno"] = pd.to_datetime(df["data_inicio_turno"], errors="coerce")
-    df["fim_turno"]    = pd.to_datetime(df["data_fim_turno"], errors="coerce")
-    df["nome"] = df["nome"].astype(str)
-
-    # ⚠️ descartar quaisquer coordenadas em equipes
-    for col in ("longitude","latitude","lon","lat","nox","noy","x","y"):
-        if col in df.columns:
-            df.drop(columns=[col], inplace=True)
-
-    # manter colunas úteis
-    keep = ["tip_equipe","nome","dt_ref","dthaps_ini","dthaps_fim_ajustado",
-            "inicio_turno","fim_turno"]
-    keep = [c for c in keep if c in df.columns]
-    return df[keep].copy()
 
 def _prep_tecnicos() -> pd.DataFrame:
+    """
+    Carrega e normaliza a base de serviços técnicos (atendTec.parquet) para o layout V3.
+
+    Espera uma estrutura semelhante a:
+
+    - TIPO_BASE / TIPSERV
+    - NUMOS
+    - DH_INICIO (data/hora início)
+    - DH_ALOCACAO
+    - DH_CHEGADA
+    - DH_FINAL (data/hora término)
+    - TE (tempo de execução em minutos)
+    - TD (tempo de deslocamento em minutos) [opcional]
+    - LATITUDE, LONGITUDE (coordenadas)
+    - EUSD, EUSD_FIO_B [opcionais]
+    """
     df = _read_parquet_any("atendTec.parquet").copy()
+
+    # normaliza nomes de colunas
     df.columns = df.columns.str.lower()
-    df = df.drop_duplicates(subset=["numos"])
-    ren = {
-        "tipo_base":"tipo_base",
-        "numos":"numos",
-        "abrangencia":"abrangencia",
-        "defeito_falha":"defeito_falha",
-        "localidade":"localidade",
-        "localizacao":"localizacao",
-        "nox":"nox","noy":"noy",
-        "dh_inicio":"dh_inicio",
-        "dh_alocacao":"dh_alocacao",
-        "dh_chegada":"dh_chegada",
-        "dh_final":"dh_final",
-        "tp":"tp","td":"td","te":"te",
-        "equipe":"equipe",
-        "ano":"ano","mes":"mes",
-        "eusd":"eusd","eusd_fio_b":"eusd_fio_b",
-        "latitude":"latitude","longitude":"longitude",
+    df = df.drop_duplicates(subset="numos")
+
+    # rename mínimo para padronizar
+    rename_map = {
+        "numos": "numos",
+        "dh_inicio": "datasol",
+        "dh_allocacao": "datasaida",     # se existir; alguns datasets usam dh_alocacao
+        "dh_alocacao": "datasaida",
+        "dh_chegada": "datainitrab",
+        "dh_final": "datater_trab",
+        "latitude": "latitude",
+        "longitude": "longitude",
+        "te": "te",
+        "td": "td",
+        "eusd": "EUSD",
+        "eusd_fio_b": "EUSD_FIO_B",
     }
-    df = df.rename(columns=ren)
+    df = df.rename(columns=rename_map)
 
-    # datas
-    for c in ["dh_inicio","dh_alocacao","dh_chegada","dh_final"]:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
+    # caso original do usuário (se as colunas estiverem com nomes específicos)
+    # esses renames não conflitam, apenas garantem compatibilidade
+    if "dh_inicio" in df.columns and "datasol" not in df.columns:
+        df["datasol"] = pd.to_datetime(df["dh_inicio"], errors="coerce")
+    else:
+        df["datasol"] = pd.to_datetime(df.get("datasol"), errors="coerce")
 
-    # padronizar nomes de campos-alvo do motor
-    df["tipo_serv"]    = "técnico"
-    df["datasol"]      = df["dh_inicio"]
-    df["dataven"]      = pd.NaT
-    df["datater_trab"] = df["dh_final"]
-    df["dt_ref"]       = pd.to_datetime(df["dh_inicio"], errors="coerce").dt.normalize()
+    df["datater_trab"] = pd.to_datetime(df.get("datater_trab"), errors="coerce")
 
-    # TE/TD como minutos (já vem em minutos)
-    df["TE"] = pd.to_numeric(df["te"], errors="coerce")
-    df["TD"] = pd.to_numeric(df["td"], errors="coerce")
+    # TIPO: todos técnicos
+    df["tipo_serv"] = "técnico"
 
-    # prioridade/violação (placeholders – podem ser refinados)
-    df["prioridade"] = 1.0
-    df["violacao"]   = 0.0
+    # numos como string consistente
+    if "numos" in df.columns:
+        df["numos"] = df["numos"].astype(str)
+    else:
+        df["numos"] = pd.NA
 
-    return df
+    # TD/TE numéricos (minutos)
+    df["TE"] = pd.to_numeric(df.get("te", df.get("TE", 0)), errors="coerce").fillna(0).astype(float)
+    df["TD"] = pd.to_numeric(df.get("td", df.get("TD", 0)), errors="coerce").fillna(0).astype(float)
+
+    # Coordenadas
+    df["latitude"] = pd.to_numeric(df.get("latitude"), errors="coerce")
+    df["longitude"] = pd.to_numeric(df.get("longitude"), errors="coerce")
+
+    # dt_ref: dia de referência = data de solicitação normalizada
+    df["dt_ref"] = pd.to_datetime(df["datasol"], errors="coerce").dt.normalize()
+
+    # EUSD / EUSD_FIO_B se existirem
+    if "EUSD" not in df.columns and "eusd" in df.columns:
+        df["EUSD"] = pd.to_numeric(df["eusd"], errors="coerce")
+    if "EUSD_FIO_B" not in df.columns and "eusd_fio_b" in df.columns:
+        df["EUSD_FIO_B"] = pd.to_numeric(df["eusd_fio_b"], errors="coerce")
+
+    # Seleciona colunas principais
+    cols = [
+        "tipo_serv",
+        "numos",
+        "datasol",
+        "datater_trab",
+        "TD",
+        "TE",
+        "latitude",
+        "longitude",
+        "dt_ref",
+        "EUSD",
+        "EUSD_FIO_B",
+    ]
+    # garante existência das colunas (mesmo que NA)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+
+    return df[cols].copy()
+
 
 def _prep_comercial() -> pd.DataFrame:
+    """
+    Carrega e normaliza a base de serviços comerciais (ServCom.parquet) para o layout V3.
+
+    Espera uma estrutura semelhante a:
+
+    - NUMOS
+    - TIPSERV / TIPO_BASE
+    - DATASOL (DATA_SOL)
+    - DATAVENC (DATA_VENC)
+    - DATATERTRAB
+    - LATITUDE, LONGITUDE
+    - TE, TD (minutos)
+    - EUSD, EUSD_FIO_B [opcionais]
+    """
     df = _read_parquet_any("ServCom.parquet").copy()
+    
+
+    # normaliza nomes de colunas
     df.columns = df.columns.str.lower()
-    df = df.drop_duplicates(subset=["numos"])
-    df = df[df["data_venc"] >= df["data_sol"]]
+    df = df.drop_duplicates(subset="numos")
+    df = df[df["dataven"] > df["datasol"]]
 
-    ren = {
-        "numos":"numos",
-        "tipserv":"tipserv",
-        "codserv":"codserv",
-        "data_sol":"data_sol",
-        "data_venc":"data_venc",
-        "datasaida":"datasaida",
-        "datainitrab":"datainitrab",
-        "datatertrab":"datatertrab",
-        "equipe":"equipe",
-        "td":"td","te":"te",
-        "latitude":"latitude","longitude":"longitude",
-        "eusd_fio_b":"eusd_fio_b","eusd":"eusd"
+    rename_map = {
+        "numos": "numos",
+        "data_sol": "datasol",
+        "datasol": "datasol",
+        "data_venc": "dataven",
+        "data_vencimento": "dataven",
+        "datatertrab": "datater_trab",
+        "latitude": "latitude",
+        "longitude": "longitude",
+        "te": "te",
+        "td": "td",
+        "eusd": "EUSD",
+        "eusd_fio_b": "EUSD_FIO_B",
     }
-    df = df.rename(columns=ren)
+    df = df.rename(columns=rename_map)
 
-    for c in ["data_sol","data_venc","datasaida","datainitrab","datatertrab"]:
-        df[c] = pd.to_datetime(df[c], errors="coerce")
+    # tipo sempre comercial
+    df["tipo_serv"] = "comercial"
 
-    df["tipo_serv"]    = "comercial"
-    df["datasol"]      = df["data_sol"]
-    df["dataven"]      = df["data_venc"]
-    df["datater_trab"] = df["datatertrab"]
-    df["dt_ref"]       = pd.to_datetime(df["data_sol"], errors="coerce").dt.normalize()
+    # datas
+    df["datasol"] = pd.to_datetime(df.get("datasol"), errors="coerce")
+    df["dataven"] = pd.to_datetime(df.get("dataven"), errors="coerce")
+    df["datater_trab"] = pd.to_datetime(df.get("datater_trab"), errors="coerce")
 
-    df["TE"] = pd.to_numeric(df["te"], errors="coerce")
-    df["TD"] = pd.to_numeric(df["td"], errors="coerce")
+    # numos como string
+    if "numos" in df.columns:
+        df["numos"] = df["numos"].astype(str)
+    else:
+        df["numos"] = pd.NA
 
-    # prioridade: exemplo — aproximar vencimento mais próximo
-    df["prioridade"] = 1.0
-    with pd.option_context("mode.use_inf_as_na", True):
-        prox = (df["dataven"] - df["datasol"]).dt.total_seconds() / 3600.0
-    df.loc[prox.notna(), "prioridade"] = 1.0 + (24.0 / (prox.clip(lower=1.0)))
-    df["violacao"]   = 0.0
-    return df
+    # TD/TE numéricos (minutos)
+    df["TE"] = pd.to_numeric(df.get("te", df.get("TE", 0)), errors="coerce").fillna(0).astype(float)
+    df["TD"] = pd.to_numeric(df.get("td", df.get("TD", 0)), errors="coerce").fillna(0).astype(float)
 
-def prepare_pendencias():
-    tec = _prep_tecnicos()
-    com = _prep_comercial()
+    # Coordenadas
+    df["latitude"] = pd.to_numeric(df.get("latitude"), errors="coerce")
+    df["longitude"] = pd.to_numeric(df.get("longitude"), errors="coerce")
 
-    # sanitização mínima de coordenadas
-    for d in (tec, com):
-        for c in ["latitude","longitude"]:
-            d[c] = pd.to_numeric(d[c], errors="coerce")
+    # dt_ref: dia de referência = data de solicitação normalizada
+    df["dt_ref"] = pd.to_datetime(df["datasol"], errors="coerce").dt.normalize()
 
-    # remover linhas sem coordenadas válidas
-    tec = tec.dropna(subset=["latitude","longitude"])
-    com = com.dropna(subset=["latitude","longitude"])
-    com.to_parquet('/data/ServicosComerciais.parquet', index=False)
-    tec.to_parquet('/data/ServicosTecnicos.parquet', index=False)
+    # EUSD / EUSD_FIO_B se existirem
+    if "EUSD" not in df.columns and "eusd" in df.columns:
+        df["EUSD"] = pd.to_numeric(df["eusd"], errors="coerce")
+    if "EUSD_FIO_B" not in df.columns and "eusd_fio_b" in df.columns:
+        df["EUSD_FIO_B"] = pd.to_numeric(df["eusd_fio_b"], errors="coerce")
 
-    return tec.reset_index(drop=True), com.reset_index(drop=True)
+    cols = [
+        "tipo_serv",
+        "numos",
+        "datasol",
+        "dataven",
+        "datater_trab",
+        "TD",
+        "TE",
+        "latitude",
+        "longitude",
+        "dt_ref",
+        "EUSD",
+        "EUSD_FIO_B",
+    ]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+
+    return df[cols].copy()

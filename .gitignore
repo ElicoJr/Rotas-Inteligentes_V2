@@ -93,3 +93,7 @@ data/*-e
 # Environment files
 *.env
 *.env.*
+-e 
+# Environment files
+*.env
+*.env.*

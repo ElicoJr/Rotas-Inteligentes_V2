@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 # v3/data_loader.py
-=======
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
 from pathlib import Path
 import pandas as pd
 
@@ -12,11 +9,7 @@ DATA_DIRS = [Path("data"), Path("/data")]
 
 
 def prepare_equipes_v3() -> pd.DataFrame:
-<<<<<<< HEAD
     """Carrega Equipes.parquet mantendo colunas de pausa e base da equipe.
-=======
-    """Carrega Equipes.parquet mantendo também as colunas de pausa.
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
 
     Campos principais padronizados:
     - tip_equipe
@@ -28,10 +21,7 @@ def prepare_equipes_v3() -> pd.DataFrame:
     - fim_turno    (DATA_FIM_TURNO)
     - dthpausa_ini
     - dthpausa_fim
-<<<<<<< HEAD
     - base_lon, base_lat (base específica da equipe)
-=======
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
     """
     df = _read_parquet_any("Equipes.parquet").copy()
     df.columns = df.columns.str.lower()
@@ -48,12 +38,9 @@ def prepare_equipes_v3() -> pd.DataFrame:
         "dthaps_fim_ajustado": "dthaps_fim_ajustado",
         "dthpausa_ini": "dthpausa_ini",
         "dthpausa_fim": "dthpausa_fim",
-<<<<<<< HEAD
         # Se suas colunas de base tiverem outros nomes, mapeie aqui:
         # "x_base": "base_lon",
         # "y_base": "base_lat",
-=======
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
     }
     df = df.rename(columns=rename)
 
@@ -81,16 +68,12 @@ def prepare_equipes_v3() -> pd.DataFrame:
     df["fim_turno"] = pd.to_datetime(df.get("data_fim_turno"), errors="coerce")
     df["nome"] = df["nome"].astype(str)
 
-<<<<<<< HEAD
     # garantir base_lon/base_lat como numérico, se existirem
     for c in ("base_lon", "base_lat"):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
     # descartar coordenadas irrelevantes de equipes (mas manter base_lon/base_lat)
-=======
-    # descartar quaisquer coordenadas em equipes
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
     for col in ("longitude", "latitude", "lon", "lat", "nox", "noy", "x", "y"):
         if col in df.columns:
             df.drop(columns=[col], inplace=True)
@@ -105,11 +88,8 @@ def prepare_equipes_v3() -> pd.DataFrame:
         "fim_turno",
         "dthpausa_ini",
         "dthpausa_fim",
-<<<<<<< HEAD
         "base_lon",
         "base_lat",
-=======
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
     ]
     keep = [c for c in keep if c in df.columns]
     return df[keep].copy()
@@ -135,8 +115,4 @@ def prepare_pendencias_v3():
         if "equipe" in d.columns:
             d.drop(columns=["equipe"], inplace=True)
 
-<<<<<<< HEAD
     return tec.reset_index(drop=True), com.reset_index(drop=True)
-=======
-    return tec.reset_index(drop=True), com.reset_index(drop=True)
->>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c

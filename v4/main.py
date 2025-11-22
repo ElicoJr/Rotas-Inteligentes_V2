@@ -416,7 +416,12 @@ def simular_v4(
                     ~pend_com_global["numos"].astype(str).isin(assigned_nums)
                 ]
 
-            # Log por equipe dentro do grupo
+            # Log de distribuição por equipe no grupo
+            distribuicao = df_group_res.groupby("equipe").size().to_dict()
+            total_grupo = len(df_group_res)
+            log(f"   ✅ Total atribuído no grupo: {total_grupo} OS | Distribuição: {distribuicao}")
+            
+            # Log detalhado por equipe dentro do grupo
             for nome_eq, df_eq_res in df_group_res.groupby("equipe"):
                 ini_turno_eq = pd.to_datetime(
                     eq_group[eq_group["nome"] == nome_eq]["inicio_turno"].iloc[0],

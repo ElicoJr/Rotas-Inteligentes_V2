@@ -256,11 +256,9 @@ def _solve_group_vroom_single(
         return pd.DataFrame(), set()
 
     # Pré-filtro de performance com limite absoluto para evitar sobrecarga do VROOM
-    fator_pool = 3  # Reduzido de 4 para 3
-    max_jobs_absoluto = 150  # Limite absoluto para evitar erro 500 no VROOM
     n_veic = len(eq_group)
-    max_jobs_calculado = limite_por_equipe * n_veic * fator_pool
-    max_jobs = min(max_jobs_calculado, max_jobs_absoluto, len(pool))
+    max_jobs_calculado = limite_por_equipe * n_veic * v4_config.FATOR_POOL
+    max_jobs = min(max_jobs_calculado, v4_config.MAX_JOBS_ABSOLUTO, len(pool))
 
     if len(pool) > max_jobs:
         pool = pool.copy()
@@ -269,8 +267,8 @@ def _solve_group_vroom_single(
         pool = pool.drop(columns=["__score"])
     
     # Log de debug para diagnóstico
-    if len(pool) > 100:
-        log(f"   ⚠️  Pool grande: {len(pool)} jobs para {n_veic} veículos (limite absoluto: {max_jobs_absoluto})")
+    if len(pool) > v4_config.POOL_WARNING_THRESHOLD:
+        log(f"   ⚠️  Pool grande: {len(pool)} jobs para {n_veic} veículos (limite: {v4_config.MAX_JOBS_ABSOLUTO})")
 
     pool = pool.reset_index(drop=True)
     pool["job_id_vroom"] = pool.index + 1

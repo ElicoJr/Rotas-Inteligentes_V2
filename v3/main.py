@@ -142,8 +142,7 @@ def simular_v3(
         eq_dia = eq_dia.sort_values("inicio_turno")
         ini_turno_min = pd.to_datetime(eq_dia["inicio_turno"], errors="coerce").min()
 
-        # --- Cálculo de pendências novas, backlog e total (apenas para log) ---
-        # novas do dia (dt_ref == dia) e datasol <= inicio_turno_min
+        # --- Cálculo de pendências novas, backlog e total (para log) ---
         if not pend_tec_global.empty:
             ds_tec = pd.to_datetime(pend_tec_global["datasol"], errors="coerce")
             mask_tec_elig = ds_tec <= ini_turno_min
@@ -164,7 +163,6 @@ def simular_v3(
         else:
             pend_new_com = pend_backlog_com = 0
 
-        # Logs no formato solicitado
         total_new = pend_new_tec + pend_new_com
         total_backlog = pend_backlog_tec + pend_backlog_com
         total_pend = total_new + total_backlog
@@ -247,14 +245,11 @@ def simular_v3(
                     else 0
                 )
 
-                # LOG no formato solicitado para equipe:
-                # 🚚 PVLPL46 | {inicio_turno} → 15 OS (Tec=7 | Com=8) | 📦→ 22 (Tec=7 | Com=15)
                 atribs_dia.append(df_resp)
                 any_assigned_this_round = True
                 atrib_por_equipe[nome_eq] = ja_atribuidas + qtd
 
                 # Remover OS atribuídas (numos) dos pools globais
-                rest_tec = rest_com = 0
                 if "numos" in df_resp.columns:
                     atendidos = (
                         df_resp["numos"]
@@ -274,18 +269,27 @@ def simular_v3(
                                 ~pend_com_global["numos"].astype(str).isin(atendidos)
                             ]
 
-                rest_tec = len(pend_tec_global)
-                rest_com = len(pend_com_global)
+                # Contar APENAS as pendências atendíveis para esta equipe (datasol <= inicio_turno_eq)
+                rest_tec = rest_com = 0
+                if not pend_tec_global.empty:
+                    ds_tec_glob = pd.to_datetime(pend_tec_global["datasol"], errors="coerce")
+                    mask_tec_eq = ds_tec_glob <= ini_turno_eq
+                    rest_tec = mask_tec_eq.sum()
+                if not pend_com_global.empty:
+                    ds_com_glob = pd.to_datetime(pend_com_global["datasol"], errors="coerce")
+                    mask_com_eq = ds_com_glob <= ini_turno_eq
+                    rest_com = mask_com_eq.sum()
+
                 rest_tot = rest_tec + rest_com
 
+                # LOG no formato solicitado:
+                # 🚚 PVLPL46 | {inicio_turno} → 15 OS (Tec=7 | Com=8) | 📦→ 22 (Tec=7 | Com=15)
                 log(
                     f"🚚 {nome_eq} | {ini_turno_eq} → {qtd} OS "
                     f"(Tec={num_tec_eq} | Com={num_com_eq}) | "
                     f"📦→ {rest_tot} (Tec={rest_tec} | Com={rest_com})"
                 )
 
-            # se, após percorrer todas as equipes nesta rodada, ninguém recebeu OS,
-            # quer dizer que as OS restantes (se existirem) são inviáveis para todas as equipes
             if not any_assigned_this_round:
                 break
 
@@ -319,9 +323,9 @@ def main() -> None:
     parser.add_argument("--limite", type=int, default=15, help="Limite máximo de OS por equipe")
     parser.add_argument("--debug", action="store_true", help="Imprimir estatísticas adicionais")
     args = parser.parse_args()
-
+    inicio_simulacao = datetime.now()
     log("=" * 120)
-    log(f"🚀 Simulação V3 iniciada às {datetime.now():%H:%M:%S}")
+    log(f"🚀 Simulação V3 iniciada às {inicio_simulacao:%H:%M:%S}")
 
     try:
         df_eq = prepare_equipes_v3()
@@ -331,10 +335,12 @@ def main() -> None:
         raise
 
     simular_v3(df_eq, df_te, df_co, limite_por_equipe=args.limite, debug=args.debug)
-
-    log("\n✅ PROCESSO V3 FINALIZADO COM SUCESSO!")
+    final_simulacao = datetime.now()
+    tempoProcessamento = (final_simulacao - inicio_simulacao).total_seconds()/60
+    log(f"\n✅ PROCESSO V3 FINALIZADO COM SUCESSO!")
     log(f"📂 Resultados em: {RESULTS_DIR.resolve()}")
-    log(f"🚀 Simulação V3 finalizada às {datetime.now():%H:%M:%S}")
+    log(f"⏱️ Simulação executada em {tempoProcessamento:.2f}")
+    log(f"🟢 Início: {inicio_simulacao:%H:%M:%S} | 🏁 Final: {final_simulacao:%H:%M:%S}")
 
 
 if __name__ == "__main__":

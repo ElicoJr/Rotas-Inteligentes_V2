@@ -324,7 +324,6 @@ class MetaHeuristicaV3:
                 df_jobs_tagged["dth_chegada_estimada"] = (
                     df_jobs_tagged["job_id_vroom"].map(eta_map).astype("datetime64[ns]")
                 )
-                df_jobs_tagged.loc[df_jobs_tagged["dth_chegada_estimada"].notna(), "eta_source"] = "VROOM"
 
             # termino = chegada + TE (segundos)
             te_sec = df_jobs_tagged.apply(_service_seconds_from_row, axis=1)
@@ -336,6 +335,10 @@ class MetaHeuristicaV3:
             # chegada à base pela arrival do 'end'
             if end_arrival_s is not None:
                 df_jobs_tagged["fim_turno_estimado"] = t0 + pd.to_timedelta(end_arrival_s, unit="s")
+
+            # marca todos como VROOM
+            df_jobs_tagged["eta_source"] = "VROOM"
+            df_jobs_tagged["eta_source"] = df_jobs_tagged["eta_source"].astype("string")
 
             return resp, df_jobs_tagged
 
@@ -461,7 +464,7 @@ class MetaHeuristicaV3:
         return {"resp": final}
 
 
-# ===== Helpers ETA/ETD ===== (iguais à versão anterior)
+# ===== Helpers ETA/ETD =====
 def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
     t = pd.to_datetime(t_cursor, errors="coerce")
     try:

@@ -328,7 +328,8 @@ def _solve_group_vroom_single(
         veh_id_to_nome[v_id] = str(erow["nome"])
 
     # Log de debug do payload
-    log(f"   📤 Enviando ao VROOM: {len(vehicles)} veículos × {len(jobs)} jobs (cap={limite_por_equipe} cada)")
+    jobs_por_veiculo = len(jobs) / len(vehicles) if vehicles else 0
+    log(f"   📤 Enviando ao VROOM: {len(vehicles)} veículos × {len(jobs)} jobs (~{jobs_por_veiculo:.1f} jobs/veículo, cap={limite_por_equipe})")
     
     vc = VroomClient()
     try:

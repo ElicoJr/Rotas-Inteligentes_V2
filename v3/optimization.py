@@ -224,22 +224,43 @@ class MetaHeuristicaV3:
         best_sol = []
         best_fit = -1e9
 
+        # reforça solução do SA, se existir
         if sol_sa_idx:
             base_fit = score_subset(sol_sa_idx)
             if base_fit > best_fit:
                 best_fit, best_sol = base_fit, sol_sa_idx[:]
-            for i in sol_sa_idx:
-                pher[i] += base_fit / 10.0
+            if base_fit > 0:
+                for i in sol_sa_idx:
+                    pher[i] += base_fit / 10.0
 
         for _ in range(iters):
+            # garante feromônios sempre positivos
+            pher = np.nan_to_num(pher, nan=0.0)
+            min_pher = pher.min()
+            if min_pher <= 0:
+                pher = pher - min_pher + 1e-6  # shift para ficar > 0
+
+            total = pher.sum()
+            if not np.isfinite(total) or total <= 0:
+                pher = np.ones_like(pher)
+                total = pher.sum()
+
+            probs = pher / total
+
             for _a in range(ants):
-                probs = pher / (pher.sum() if pher.sum() > 0 else 1.0)
-                choice = np.random.choice(np.arange(n), size=min(k, n), replace=False, p=probs)
+                choice = np.random.choice(
+                    np.arange(n),
+                    size=min(k, n),
+                    replace=False,
+                    p=probs,
+                )
                 fit = score_subset(choice.tolist())
                 if fit > best_fit:
                     best_fit, best_sol = fit, choice.tolist()
-                pher[choice] += fit / 10.0
-            pher *= 1.0 - evap
+                if fit > 0:
+                    pher[choice] += fit / 10.0
+
+            pher *= (1.0 - evap)
 
         if not best_sol:
             return pd.DataFrame()

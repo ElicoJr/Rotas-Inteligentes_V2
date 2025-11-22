@@ -23,8 +23,8 @@ Content-Type: application/json
     }
   ],
   "options": {
-    "g": false,
-    "use_matrices": true
+    "g": false
+
   }
 }
 

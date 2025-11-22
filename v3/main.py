@@ -80,11 +80,12 @@ def _ensure_result_schema(df: pd.DataFrame) -> pd.DataFrame:
     return df[ordered + extras]
 
 
-def _tem_pendencias_atendiveis(pend_tec_dia: pd.DataFrame, pend_com_dia: pd.DataFrame, ini_turno_min: pd.Timestamp) -> bool:
-    """
-    Verifica rapidamente se ainda existem OS com datasol <= menor início de turno do dia.
-    Isso evita tentar rodar rodadas se só restaram OS "futuras".
-    """
+def _tem_pendencias_atendiveis(
+    pend_tec_dia: pd.DataFrame,
+    pend_com_dia: pd.DataFrame,
+    ini_turno_min: pd.Timestamp,
+) -> bool:
+    """Retorna True se ainda existem OS com datasol <= menor início de turno do dia."""
     if not pend_tec_dia.empty:
         ds_tec = pd.to_datetime(pend_tec_dia["datasol"], errors="coerce")
         if (ds_tec <= ini_turno_min).any():
@@ -204,7 +205,23 @@ def simular_v3(
 
                 df_resp = _ensure_result_schema(df_resp)
                 qtd = len(df_resp)
-                log(f"🚚 Equipe {nome_eq} (rodada {rodada}) → {qtd} serviços atribuídos")
+
+                # contagem por tipo de serviço (técnico/comercial)
+                num_tec_eq = (
+                    (df_resp["tipo_serv"] == "técnico").sum()
+                    if "tipo_serv" in df_resp.columns
+                    else 0
+                )
+                num_com_eq = (
+                    (df_resp["tipo_serv"] == "comercial").sum()
+                    if "tipo_serv" in df_resp.columns
+                    else 0
+                )
+
+                log(
+                    f"🚚 Equipe {nome_eq} (rodada {rodada}) → {qtd} serviços atribuídos "
+                    f"(Tec={num_tec_eq} | Com={num_com_eq})"
+                )
 
                 atribs_dia.append(df_resp)
                 any_assigned_this_round = True
@@ -241,7 +258,7 @@ def simular_v3(
                                 ~pend_com_global["numos"].astype(str).isin(atendidos)
                             ]
 
-                # LOG solicitado: pendências restantes para o dia após esta equipe
+                # LOG de pendências restantes após essa equipe
                 rest_tec = len(pend_tec_dia)
                 rest_com = len(pend_com_dia)
                 rest_tot = rest_tec + rest_com

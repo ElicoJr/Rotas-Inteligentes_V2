@@ -1,4 +1,5 @@
 # v3/optimization.py
+import math
 import pandas as pd
 import numpy as np
 import random
@@ -39,19 +40,115 @@ class MetaHeuristicaV3:
         except Exception:
             pass
 
+        # Momento de início do turno da equipe (para cálculo de tempo pendente/vencimento)
+        self.turno_ini = pd.to_datetime(self.equipe["inicio_turno"], errors="coerce")
+
     # ---------------- PRIORIDADE (score) ----------------
-    def _score_base(self, row):
-        prioridade = float(row.get("prioridade", 1) or 1)
-        tempo_espera = float(row.get("tempo_espera", 0) or 0)  # min
+    def _score_base(self, row: pd.Series) -> float:
+        """
+        Score de prioridade combinando:
+        - OS comercial:
+            * mais prioridade quanto mais próxima do vencimento ou já vencida (dataven)
+            * mais prioridade quanto maior o EUSD
+        - OS técnica:
+            * mais prioridade quanto mais tempo pendente (datasol -> inicio_turno)
+            * mais prioridade quanto maior o EUSD
+
+        Também aproveita, se existirem, colunas pré-calculadas:
+        - prioridade
+        - tempo_espera
+        - violacao
+        """
+        tipo = (row.get("tipo_serv") or row.get("tipo") or "").strip().lower()
+
+        # tempo_espera (se já existir no dataframe)
+        tempo_espera = float(row.get("tempo_espera", 0) or 0)
+
+        # valor de EUSD (tanto faz se vier como EUSD, eusd, EUSD_FIO_B)
+        eusd_raw = row.get("EUSD", row.get("eusd", row.get("EUSD_FIO_B", 0)))
+        try:
+            eusd = float(eusd_raw or 0.0)
+        except Exception:
+            eusd = 0.0
+
+        # normalização simples para não explodir o score (log(1 + EUSD))
+        eusd_score = math.log1p(eusd) if eusd > 0 else 0.0
+
+        # tempo pendente em dias até o início do turno
+        tempo_pendente_dias = 0.0
+        datasol = row.get("datasol") or row.get("data_sol")
+        if datasol is not None:
+            try:
+                ds = pd.to_datetime(datasol, errors="coerce")
+                if pd.notna(ds) and pd.notna(self.turno_ini):
+                    tempo_pendente_dias = max(
+                        0.0, (self.turno_ini - ds).total_seconds() / 86400.0
+                    )
+            except Exception:
+                tempo_pendente_dias = 0.0
+
+        # urgência por vencimento (somente comerciais)
+        urg_venc = 0.0
+        if tipo == "comercial":
+            dataven = row.get("dataven") or row.get("data_venc")
+            if dataven is not None:
+                try:
+                    dv = pd.to_datetime(dataven, errors="coerce")
+                    if pd.notna(dv) and pd.notna(self.turno_ini):
+                        dias_para_venc = (dv - self.turno_ini).total_seconds() / 86400.0
+                        # queremos mais score quanto mais próxima de vencer (dias_para_venc pequeno ou negativo)
+                        urg_venc = -dias_para_venc
+                except Exception:
+                    urg_venc = 0.0
+
+        # peso de prioridade/violação pré-existentes, se houverem
+        prioridade_base = float(row.get("prioridade", 1) or 1)
         violacao = float(row.get("violacao", 0) or 0)
-        return (2.0 * prioridade) - (0.005 * tempo_espera) - (0.5 * violacao)
+
+        # Ponderação final (ajustável):
+        # Comerciais: priorizam vencimento + EUSD, técnicos: tempo pendente + EUSD
+        if tipo == "comercial":
+            score = (
+                1.0 * prioridade_base
+                + 3.0 * urg_venc       # urgência por vencimento
+                + 0.5 * tempo_pendente_dias
+                + 1.0 * eusd_score
+                - 0.5 * violacao
+            )
+        elif tipo == "técnico":
+            score = (
+                1.0 * prioridade_base
+                + 2.5 * tempo_pendente_dias
+                + 1.0 * eusd_score
+                - 0.5 * violacao
+            )
+        else:
+            # tipo indefinido: usa um mix suave
+            score = (
+                1.0 * prioridade_base
+                + 1.0 * tempo_pendente_dias
+                + 0.8 * eusd_score
+                - 0.5 * violacao
+            )
+
+        # também mistura tempo_espera se existir (em minutos)
+        score += 0.001 * tempo_espera
+
+        return float(score)
 
     # ---------------- AG ----------------
-    def _ag(self, pool, k=10, pop_size=25, gens=15, pmut=0.2):
+    def _ag(self, pool, k=10, pop_size=20, gens=10, pmut=0.2):
         n = len(pool)
         k = min(k, n)
         if k <= 0:
             return []
+
+        # caso trivial: escolher apenas 1 índice (evita randint(1,0))
+        if k == 1:
+            if n == 0:
+                return []
+            best_idx = max(range(n), key=lambda i: self._score_base(pool.iloc[i]))
+            return [best_idx]
 
         def fit(sol_idx):
             if not sol_idx:
@@ -84,8 +181,8 @@ class MetaHeuristicaV3:
 
     # ---------------- SA ----------------
     def _sa(self, pool, sol_idx, t0=100.0, alpha=0.9):
-        if not sol_idx:
-            return []
+        if not sol_idx or len(sol_idx) <= 1:
+            return sol_idx
         k = len(sol_idx)
 
         def fit(sol):
@@ -110,7 +207,7 @@ class MetaHeuristicaV3:
         return best
 
     # ---------------- ACO ----------------
-    def _aco(self, pool, sol_sa_idx, k=None, iters=10, ants=10, evap=0.5):
+    def _aco(self, pool, sol_sa_idx, k=None, iters=8, ants=8, evap=0.5):
         n = len(pool)
         if n == 0:
             return pd.DataFrame()
@@ -165,7 +262,7 @@ class MetaHeuristicaV3:
         if len(jobs) == 0:
             return None, df_jobs_tagged
 
-        t0 = pd.to_datetime(self.equipe["inicio_turno"], errors="coerce")
+        t0 = self.turno_ini
 
         vehicle = {
             "id": 1,
@@ -238,7 +335,7 @@ class MetaHeuristicaV3:
             return resp, _osrm_eta_etd(
                 self.osrm,
                 df_jobs_tagged,
-                self.equipe["inicio_turno"],
+                self.turno_ini,
                 lon_e,
                 lat_e,
                 pausa_ini=pausa_ini,
@@ -250,7 +347,7 @@ class MetaHeuristicaV3:
         # --- TENTATIVA 3: Haversine sequencial ---
         return resp, _haversine_eta_etd(
             df_jobs_tagged,
-            self.equipe["inicio_turno"],
+            self.turno_ini,
             lon_e,
             lat_e,
             pausa_ini=pausa_ini,
@@ -266,17 +363,52 @@ class MetaHeuristicaV3:
         if pool.empty:
             return None
 
-        ini_turno = pd.to_datetime(self.equipe["inicio_turno"])
         elig = pd.to_datetime(pool.get("datasol", pd.NaT), errors="coerce")
-        pool = pool[elig < ini_turno].reset_index(drop=True)
+        pool = pool[elig < self.turno_ini].reset_index(drop=True)
         if pool.empty:
             return None
 
+        # ==== PRÉ-FILTRO DE PERFORMANCE COM PRIORIDADE (vencimento, tempo pendente, EUSD) ====
+        fator_pool = 4
+        max_pool = min(self.limite_por_equipe * fator_pool, len(pool))
+
+        if len(pool) > max_pool:
+            pool = pool.copy()
+            # flag se é comercial
+            pool["__is_com"] = (pool["tipo_serv"] == "comercial").astype(int)
+            # datas
+            pool["__datasol"] = pd.to_datetime(pool["datasol"], errors="coerce")
+            pool["__dataven"] = pd.to_datetime(pool.get("dataven", pd.NaT), errors="coerce")
+
+            # EUSD normalizado
+            eusd_col = pool.get("EUSD", pool.get("eusd", pool.get("EUSD_FIO_B", 0)))
+            pool["__eusd"] = pd.to_numeric(eusd_col, errors="coerce").fillna(0.0)
+
+            # Comerciais primeiro, ordenando por:
+            # - é comercial desc
+            # - dataven asc (mais urgente primeiro)
+            # - datasol asc (mais antiga primeiro)
+            # - EUSD desc (mais valor primeiro)
+            pool = pool.sort_values(
+                by=["__is_com", "__dataven", "__datasol", "__eusd"],
+                ascending=[False, True, True, False],
+            ).head(max_pool)
+
+            pool = pool.drop(columns=["__is_com", "__datasol", "__dataven", "__eusd"], errors="ignore")\
+                       .reset_index(drop=True)
+        # ====== FIM DO PRÉ-FILTRO ======
+
         # -------- PRIORIZAÇÃO: AG → SA → ACO --------
         k = self.limite_por_equipe
-        sol_ag = self._ag(pool, k=k)
-        sol_sa = self._sa(pool, sol_ag)
-        cand_aco = self._aco(pool, sol_sa, k=k)
+
+        # atalho: se poucas OS, não rodar meta-heurística pesada
+        if len(pool) <= k:
+            cand_aco = pool.copy()
+        else:
+            sol_ag = self._ag(pool, k=k)
+            sol_sa = self._sa(pool, sol_ag)
+            cand_aco = self._aco(pool, sol_sa, k=k)
+
         if cand_aco.empty:
             return None
 

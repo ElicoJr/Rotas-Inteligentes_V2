@@ -1,6 +1,6 @@
 # v2/data_loader.py
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -32,20 +32,7 @@ def _read_parquet_any(name: str) -> pd.DataFrame:
 
 def _prep_tecnicos() -> pd.DataFrame:
     """
-    Carrega e normaliza a base de serviços técnicos (atendTec.parquet) para o layout V3.
-
-    Espera uma estrutura semelhante a:
-
-    - TIPO_BASE / TIPSERV
-    - NUMOS
-    - DH_INICIO (data/hora início)
-    - DH_ALOCACAO
-    - DH_CHEGADA
-    - DH_FINAL (data/hora término)
-    - TE (tempo de execução em minutos)
-    - TD (tempo de deslocamento em minutos) [opcional]
-    - LATITUDE, LONGITUDE (coordenadas)
-    - EUSD, EUSD_FIO_B [opcionais]
+    Carrega e normaliza a base de serviços técnicos (atendTec.parquet) para o layout V3/V4.
     """
     df = _read_parquet_any("atendTec.parquet").copy()
 
@@ -57,7 +44,7 @@ def _prep_tecnicos() -> pd.DataFrame:
     rename_map = {
         "numos": "numos",
         "dh_inicio": "datasol",
-        "dh_allocacao": "datasaida",     # se existir; alguns datasets usam dh_alocacao
+        "dh_allocacao": "datasaida",
         "dh_alocacao": "datasaida",
         "dh_chegada": "datainitrab",
         "dh_final": "datater_trab",
@@ -70,8 +57,7 @@ def _prep_tecnicos() -> pd.DataFrame:
     }
     df = df.rename(columns=rename_map)
 
-    # caso original do usuário (se as colunas estiverem com nomes específicos)
-    # esses renames não conflitam, apenas garantem compatibilidade
+    # datas
     if "dh_inicio" in df.columns and "datasol" not in df.columns:
         df["datasol"] = pd.to_datetime(df["dh_inicio"], errors="coerce")
     else:
@@ -105,7 +91,6 @@ def _prep_tecnicos() -> pd.DataFrame:
     if "EUSD_FIO_B" not in df.columns and "eusd_fio_b" in df.columns:
         df["EUSD_FIO_B"] = pd.to_numeric(df["eusd_fio_b"], errors="coerce")
 
-    # Seleciona colunas principais
     cols = [
         "tipo_serv",
         "numos",
@@ -119,7 +104,6 @@ def _prep_tecnicos() -> pd.DataFrame:
         "EUSD",
         "EUSD_FIO_B",
     ]
-    # garante existência das colunas (mesmo que NA)
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
@@ -129,26 +113,16 @@ def _prep_tecnicos() -> pd.DataFrame:
 
 def _prep_comercial() -> pd.DataFrame:
     """
-    Carrega e normaliza a base de serviços comerciais (ServCom.parquet) para o layout V3.
-
-    Espera uma estrutura semelhante a:
-
-    - NUMOS
-    - TIPSERV / TIPO_BASE
-    - DATASOL (DATA_SOL)
-    - DATAVENC (DATA_VENC)
-    - DATATERTRAB
-    - LATITUDE, LONGITUDE
-    - TE, TD (minutos)
-    - EUSD, EUSD_FIO_B [opcionais]
+    Carrega e normaliza a base de serviços comerciais (ServCom.parquet) para o layout V3/V4.
     """
     df = _read_parquet_any("ServCom.parquet").copy()
-    
 
     # normaliza nomes de colunas
     df.columns = df.columns.str.lower()
     df = df.drop_duplicates(subset="numos")
-    df = df[df["data_sol"] < df["data_venc"]]
+
+    if "dataven" in df.columns and "datasol" in df.columns:
+        df = df[df["dataven"] > df["datasol"]]
 
     rename_map = {
         "numos": "numos",
@@ -166,32 +140,25 @@ def _prep_comercial() -> pd.DataFrame:
     }
     df = df.rename(columns=rename_map)
 
-    # tipo sempre comercial
     df["tipo_serv"] = "comercial"
 
-    # datas
     df["datasol"] = pd.to_datetime(df.get("datasol"), errors="coerce")
     df["dataven"] = pd.to_datetime(df.get("dataven"), errors="coerce")
     df["datater_trab"] = pd.to_datetime(df.get("datater_trab"), errors="coerce")
 
-    # numos como string
     if "numos" in df.columns:
         df["numos"] = df["numos"].astype(str)
     else:
         df["numos"] = pd.NA
 
-    # TD/TE numéricos (minutos)
     df["TE"] = pd.to_numeric(df.get("te", df.get("TE", 0)), errors="coerce").fillna(0).astype(float)
     df["TD"] = pd.to_numeric(df.get("td", df.get("TD", 0)), errors="coerce").fillna(0).astype(float)
 
-    # Coordenadas
     df["latitude"] = pd.to_numeric(df.get("latitude"), errors="coerce")
     df["longitude"] = pd.to_numeric(df.get("longitude"), errors="coerce")
 
-    # dt_ref: dia de referência = data de solicitação normalizada
     df["dt_ref"] = pd.to_datetime(df["datasol"], errors="coerce").dt.normalize()
 
-    # EUSD / EUSD_FIO_B se existirem
     if "EUSD" not in df.columns and "eusd" in df.columns:
         df["EUSD"] = pd.to_numeric(df["eusd"], errors="coerce")
     if "EUSD_FIO_B" not in df.columns and "eusd_fio_b" in df.columns:

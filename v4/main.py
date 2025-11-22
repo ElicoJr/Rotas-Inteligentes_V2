@@ -184,9 +184,8 @@ def _solve_group_vroom(
     if pd.isna(group_ini):
         return pd.DataFrame(), set()
     
-    # Se grupo muito grande, dividir em sub-grupos de até 6 equipes
-    MAX_EQUIPES_POR_SUBGRUPO = 6
-    if len(eq_group) > MAX_EQUIPES_POR_SUBGRUPO:
+    # Se grupo muito grande, dividir em sub-grupos
+    if len(eq_group) > v4_config.MAX_EQUIPES_POR_SUBGRUPO:
         log(f"   ⚙️  Grupo grande ({len(eq_group)} equipes) - Dividindo em sub-grupos de {MAX_EQUIPES_POR_SUBGRUPO}")
         all_results = []
         all_assigned = set()

@@ -197,7 +197,7 @@ def _solve_group_vroom(
     pool = pool.reset_index(drop=True)
     pool["job_id_vroom"] = pool.index + 1
 
-    # Monta jobs VROOM
+    # Monta jobs VROOM com delivery=1 para controle de capacidade
     jobs = []
     for idx, row in pool.iterrows():
         try:
@@ -216,13 +216,14 @@ def _solve_group_vroom(
                 "id": int(pool.at[idx, "job_id_vroom"]),
                 "location": [lon, lat],
                 "service": service_sec,
+                "delivery": [1],  # Cada job consome 1 unidade de capacidade
             }
         )
 
     if not jobs:
         return pd.DataFrame(), set()
 
-    # Monta veículos VROOM
+    # Monta veículos VROOM com capacidade limitada
     vehicles = []
     veh_id_to_nome: Dict[int, str] = {}
 
@@ -245,6 +246,7 @@ def _solve_group_vroom(
             "start": [float(base_lon), float(base_lat)],
             "end": [float(base_lon), float(base_lat)],
             "time_window": [0, horizon],
+            "capacity": [limite_por_equipe],  # Limite máximo de OS por equipe
         }
         vehicles.append(vehicle)
         veh_id_to_nome[v_id] = str(erow["nome"])

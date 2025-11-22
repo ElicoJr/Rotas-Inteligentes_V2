@@ -42,4 +42,15 @@ data/*-e
 # Environment files
 *.env
 *.env.*
+<<<<<<< HEAD
 >>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c
+=======
+-e 
+# Environment files
+*.env
+*.env.*
+-e 
+# Environment files
+*.env
+*.env.*
+>>>>>>> 478bfc1997414adc44f5c84f69becce7c13cb321

@@ -40,8 +40,4 @@ class VroomClient:
             "jobs": jobs,
             "options": {"g": False},
         }
-<<<<<<< HEAD
         return self._post(payload)
-=======
-        return self._post(payload)
->>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b

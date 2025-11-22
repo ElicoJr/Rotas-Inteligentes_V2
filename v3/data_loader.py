@@ -105,6 +105,8 @@ def prepare_pendencias_v3():
     """
     tec = _prep_tecnicos()
     com = _prep_comercial()
+    com.to_parquet("E:/Rotas-Inteligentes/data/BaseCom.parquet")
+    tec.to_parquet("E:/Rotas-Inteligentes/data/BaseTec.parquet")
 
     for d in (tec, com):
         for c in ["latitude", "longitude"]:

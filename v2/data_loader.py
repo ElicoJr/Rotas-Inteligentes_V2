@@ -148,7 +148,7 @@ def _prep_comercial() -> pd.DataFrame:
     # normaliza nomes de colunas
     df.columns = df.columns.str.lower()
     df = df.drop_duplicates(subset="numos")
-    df = df[df["dataven"] > df["datasol"]]
+    df = df[df["data_sol"] < df["data_venc"]]
 
     rename_map = {
         "numos": "numos",

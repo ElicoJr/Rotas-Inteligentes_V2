@@ -1,4 +1,24 @@
 # v4/main.py
+<<<<<<< HEAD
+=======
+"""
+V4 - Otimização Multi-Veículo com Restrições de Capacidade
+
+NOVIDADES:
+- Usa VROOM multi-veículos para otimização global por grupo de turno
+- Adiciona restrições de capacidade para equilibrar distribuição:
+  * Cada veículo tem capacity=[limite_por_equipe]
+  * Cada job tem delivery=[1]
+  * Garante que nenhuma equipe pegue mais que o limite
+  * Força distribuição espacial mais equilibrada
+  * Reduz cruzamentos de rotas naturalmente
+
+BENEFÍCIOS:
+- Mais serviços atendidos (todas as equipes trabalham)
+- Menos cruzamentos entre rotas
+- Distribuição equilibrada de carga
+"""
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 import sys
 import os
 import argparse
@@ -16,11 +36,17 @@ from v4.data_loader import prepare_equipes_v3, prepare_pendencias_v3
 from v2.vroom_client import VroomClient
 from v2 import config
 
+<<<<<<< HEAD
 
 RESULTS_DIR = Path("results_v4")
 RESULTS_DIR.mkdir(exist_ok=True)
 
 
+=======
+RESULTS_DIR = Path("results_v4")
+RESULTS_DIR.mkdir(exist_ok=True)
+
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 REQUIRED_COLS = [
     "tipo_serv",
     "numos",
@@ -45,11 +71,17 @@ REQUIRED_COLS = [
     "chegada_base",
 ]
 
+<<<<<<< HEAD
 
 def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+=======
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 def _ensure_result_schema(df: pd.DataFrame) -> pd.DataFrame:
     for c in REQUIRED_COLS:
         if c not in df.columns:
@@ -80,7 +112,10 @@ def _ensure_result_schema(df: pd.DataFrame) -> pd.DataFrame:
     extras = [c for c in df.columns if c not in ordered]
     return df[ordered + extras]
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 def _score_job(row: pd.Series, turno_ini: pd.Timestamp) -> float:
     """
     Score de prioridade semelhante ao V3 (tipo, vencimento, tempo pendente, EUSD).
@@ -149,7 +184,10 @@ def _score_job(row: pd.Series, turno_ini: pd.Timestamp) -> float:
     score += 0.001 * tempo_espera
     return float(score)
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 def _solve_group_vroom(
     eq_group: pd.DataFrame,
     pend_tec_global: pd.DataFrame,
@@ -203,7 +241,11 @@ def _solve_group_vroom(
     pool = pool.reset_index(drop=True)
     pool["job_id_vroom"] = pool.index + 1
 
+<<<<<<< HEAD
     # Monta jobs VROOM
+=======
+    # Monta jobs VROOM com delivery=1 para controle de capacidade
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
     jobs = []
     for idx, row in pool.iterrows():
         try:
@@ -211,20 +253,36 @@ def _solve_group_vroom(
             lat = float(row["latitude"])
         except Exception:
             continue
+<<<<<<< HEAD
         te_min = float(row.get("TE", 0) or 0.0)
+=======
+        te_raw = row.get("TE", 0)
+        if pd.isna(te_raw):
+            te_min = 0.0
+        else:
+            te_min = float(te_raw)
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
         service_sec = max(int(te_min * 60), 0)
         jobs.append(
             {
                 "id": int(pool.at[idx, "job_id_vroom"]),
                 "location": [lon, lat],
                 "service": service_sec,
+<<<<<<< HEAD
+=======
+                "delivery": [1],  # Cada job consome 1 unidade de capacidade
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
             }
         )
 
     if not jobs:
         return pd.DataFrame(), set()
 
+<<<<<<< HEAD
     # Monta veículos VROOM
+=======
+    # Monta veículos VROOM com capacidade limitada
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
     vehicles = []
     veh_id_to_nome: Dict[int, str] = {}
 
@@ -247,6 +305,10 @@ def _solve_group_vroom(
             "start": [float(base_lon), float(base_lat)],
             "end": [float(base_lon), float(base_lat)],
             "time_window": [0, horizon],
+<<<<<<< HEAD
+=======
+            "capacity": [limite_por_equipe],  # Limite máximo de OS por equipe
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
         }
         vehicles.append(vehicle)
         veh_id_to_nome[v_id] = str(erow["nome"])
@@ -307,7 +369,10 @@ def _solve_group_vroom(
 
     return df_assigned, set(df_assigned["numos"].astype(str))
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 def simular_v4(
     df_eq: pd.DataFrame,
     df_te: pd.DataFrame,
@@ -417,7 +482,16 @@ def simular_v4(
                     ~pend_com_global["numos"].astype(str).isin(assigned_nums)
                 ]
 
+<<<<<<< HEAD
             # Log por equipe dentro do grupo
+=======
+            # Log de distribuição por equipe no grupo
+            distribuicao = df_group_res.groupby("equipe").size().to_dict()
+            total_grupo = len(df_group_res)
+            log(f"   ✅ Total atribuído no grupo: {total_grupo} OS | Distribuição: {distribuicao}")
+            
+            # Log detalhado por equipe dentro do grupo
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
             for nome_eq, df_eq_res in df_group_res.groupby("equipe"):
                 ini_turno_eq = pd.to_datetime(
                     eq_group[eq_group["nome"] == nome_eq]["inicio_turno"].iloc[0],
@@ -470,7 +544,10 @@ def simular_v4(
         else:
             log("⚠️ Nenhum registro atribuído neste dia.")
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limite", type=int, default=15, help="Limite máximo de OS por equipe")
@@ -488,6 +565,11 @@ def main() -> None:
     log("\n✅ PROCESSO V4 FINALIZADO COM SUCESSO!")
     log(f"📂 Resultados em: {RESULTS_DIR.resolve()}")
 
+<<<<<<< HEAD
 
 if __name__ == "__main__":
     main()
+=======
+if __name__ == "__main__":
+    main()
+>>>>>>> cf6295f3a56aa3e32039df485c656bedd213661b

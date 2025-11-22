@@ -30,6 +30,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from v4.data_loader import prepare_equipes_v3, prepare_pendencias_v3
+from v4 import config as v4_config
 from v2.vroom_client import VroomClient
 from v2 import config
 

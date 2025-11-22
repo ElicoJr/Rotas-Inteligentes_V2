@@ -30,5 +30,16 @@ results/*
 results_v3/*
 __pycache__/*
 v2/__pycache__/*
+<<<<<<< HEAD
 v3/__pycache__/*
 data/*
+=======
+data/*-e 
+# Environment files
+*.env
+*.env.*
+-e 
+# Environment files
+*.env
+*.env.*
+>>>>>>> adf5a9eb0e369fdaac2a596ee5a134a92492311c

@@ -93,6 +93,16 @@ if __name__ == "__main__":
     print("\n3️⃣ Testando estrutura de payload...")
     all_ok &= test_capacity_payload()
     
+    print("\n4️⃣ Testando configurações...")
+    try:
+        from v4 import config as v4_config
+        print(f"✅ MAX_JOBS_ABSOLUTO: {v4_config.MAX_JOBS_ABSOLUTO}")
+        print(f"✅ FATOR_POOL: {v4_config.FATOR_POOL}")
+        print(f"✅ MAX_EQUIPES_POR_SUBGRUPO: {v4_config.MAX_EQUIPES_POR_SUBGRUPO}")
+    except Exception as e:
+        print(f"❌ Erro nas configurações: {e}")
+        all_ok = False
+    
     print("\n" + "=" * 60)
     if all_ok:
         print("✅ TODOS OS TESTES PASSARAM!")
@@ -101,6 +111,8 @@ if __name__ == "__main__":
         print("1. Certifique-se que o VROOM está rodando (localhost:3000)")
         print("2. Execute: python -m v4.main --limite 15 --debug")
         print("3. Compare os resultados com V3 para ver a melhoria")
+        print("\n💡 Se tiver erro 500, ajuste /app/v4/config.py")
+        print("   Veja V4_TROUBLESHOOTING.md para mais detalhes")
     else:
         print("❌ ALGUNS TESTES FALHARAM")
     print("=" * 60)

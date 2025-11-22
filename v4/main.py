@@ -30,6 +30,7 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from v4.data_loader import prepare_equipes_v3, prepare_pendencias_v3
+from v4 import config as v4_config
 from v2.vroom_client import VroomClient
 from v2 import config
 
@@ -173,10 +174,64 @@ def _solve_group_vroom(
 ) -> Tuple[pd.DataFrame, Set[str]]:
     """
     Resolve um grupo de equipes que têm o MESMO inicio_turno usando VROOM multi-veículos.
+    
+    Se o grupo for muito grande (>6 equipes), divide em sub-grupos para evitar sobrecarga do VROOM.
 
     Retorna:
       df_result_group: DataFrame com atribuições desse grupo
       assigned_numos: set de numos atribuídos (para remover do backlog)
+    """
+    if eq_group.empty:
+        return pd.DataFrame(), set()
+
+    group_ini = pd.to_datetime(eq_group["inicio_turno"].iloc[0], errors="coerce")
+    if pd.isna(group_ini):
+        return pd.DataFrame(), set()
+    
+    # Se grupo muito grande, dividir em sub-grupos
+    if len(eq_group) > v4_config.MAX_EQUIPES_POR_SUBGRUPO:
+        log(f"   ⚙️  Grupo grande ({len(eq_group)} equipes) - Dividindo em sub-grupos de {v4_config.MAX_EQUIPES_POR_SUBGRUPO}")
+        all_results = []
+        all_assigned = set()
+        
+        for i in range(0, len(eq_group), v4_config.MAX_EQUIPES_POR_SUBGRUPO):
+            sub_group = eq_group.iloc[i:i+v4_config.MAX_EQUIPES_POR_SUBGRUPO]
+            log(f"      Sub-grupo {i//v4_config.MAX_EQUIPES_POR_SUBGRUPO + 1}: {len(sub_group)} equipes")
+            
+            df_sub_res, assigned_sub = _solve_group_vroom_single(
+                sub_group, pend_tec_global, pend_com_global, limite_por_equipe
+            )
+            
+            if not df_sub_res.empty:
+                all_results.append(df_sub_res)
+                all_assigned.update(assigned_sub)
+                
+                # Remove os atribuídos do backlog para os próximos sub-grupos
+                if "numos" in pend_tec_global.columns:
+                    pend_tec_global = pend_tec_global[
+                        ~pend_tec_global["numos"].astype(str).isin(assigned_sub)
+                    ]
+                if "numos" in pend_com_global.columns:
+                    pend_com_global = pend_com_global[
+                        ~pend_com_global["numos"].astype(str).isin(assigned_sub)
+                    ]
+        
+        if all_results:
+            return pd.concat(all_results, ignore_index=True), all_assigned
+        else:
+            return pd.DataFrame(), set()
+    
+    # Grupo pequeno - processar normalmente
+    return _solve_group_vroom_single(eq_group, pend_tec_global, pend_com_global, limite_por_equipe)
+
+def _solve_group_vroom_single(
+    eq_group: pd.DataFrame,
+    pend_tec_global: pd.DataFrame,
+    pend_com_global: pd.DataFrame,
+    limite_por_equipe: int,
+) -> Tuple[pd.DataFrame, Set[str]]:
+    """
+    Resolve um sub-grupo de equipes usando VROOM multi-veículos (implementação interna).
     """
     if eq_group.empty:
         return pd.DataFrame(), set()
@@ -204,16 +259,20 @@ def _solve_group_vroom(
     if pool.empty:
         return pd.DataFrame(), set()
 
-    # Pré-filtro de performance: no máximo fator * (n_equip * limite_por_equipe) OS
-    fator_pool = 4
+    # Pré-filtro de performance com limite absoluto para evitar sobrecarga do VROOM
     n_veic = len(eq_group)
-    max_jobs = min(limite_por_equipe * n_veic * fator_pool, len(pool))
+    max_jobs_calculado = limite_por_equipe * n_veic * v4_config.FATOR_POOL
+    max_jobs = min(max_jobs_calculado, v4_config.MAX_JOBS_ABSOLUTO, len(pool))
 
     if len(pool) > max_jobs:
         pool = pool.copy()
         pool["__score"] = pool.apply(lambda r: _score_job(r, group_ini), axis=1)
         pool = pool.sort_values("__score", ascending=False).head(max_jobs)
         pool = pool.drop(columns=["__score"])
+    
+    # Log de debug para diagnóstico
+    if len(pool) > v4_config.POOL_WARNING_THRESHOLD:
+        log(f"   ⚠️  Pool grande: {len(pool)} jobs para {n_veic} veículos (limite: {v4_config.MAX_JOBS_ABSOLUTO})")
 
     pool = pool.reset_index(drop=True)
     pool["job_id_vroom"] = pool.index + 1
@@ -272,11 +331,19 @@ def _solve_group_vroom(
         vehicles.append(vehicle)
         veh_id_to_nome[v_id] = str(erow["nome"])
 
+    # Log de debug do payload
+    log(f"   📤 Enviando ao VROOM: {len(vehicles)} veículos × {len(jobs)} jobs (cap={limite_por_equipe} cada)")
+    
     vc = VroomClient()
     try:
         resp = vc.route_multi(vehicles, jobs)
     except Exception as e:
-        log(f"💥 Falha VROOM multi-veículos para grupo {group_ini}: {e}")
+        error_msg = str(e)
+        if "500" in error_msg:
+            log(f"💥 VROOM sobrecarga (500): {len(vehicles)} veículos, {len(jobs)} jobs - Payload muito grande!")
+            log(f"   💡 Sugestão: Reduza --limite ou ajuste max_jobs_absoluto no código")
+        else:
+            log(f"💥 Falha VROOM multi-veículos para grupo {group_ini}: {e}")
         return pd.DataFrame(), set()
 
     routes = resp.get("routes", [])

@@ -5,19 +5,22 @@ Configurações ajustáveis do V4 para otimização de performance
 
 # === LIMITES DE PAYLOAD VROOM ===
 # Limite absoluto de jobs por chamada ao VROOM (evita erro 500)
-MAX_JOBS_ABSOLUTO = 150
+# Definido como suficientemente alto para não limitar artificialmente
+MAX_JOBS_ABSOLUTO = 300
 
 # Fator multiplicador para pré-seleção de candidatos
-# Formula: max_jobs = min(limite_por_equipe × n_equipes × FATOR_POOL, MAX_JOBS_ABSOLUTO)
-FATOR_POOL = 3
+# Formula: max_jobs_por_veiculo = limite_por_equipe × FATOR_POOL
+# Com FATOR_POOL=2 e limite=15: cada veículo recebe até 30 candidatos
+FATOR_POOL = 2
 
 # Máximo de equipes por sub-grupo (evita payloads muito grandes)
 # Grupos maiores são divididos automaticamente
-MAX_EQUIPES_POR_SUBGRUPO = 6
+# Com 4 equipes × 30 jobs/equipe = 120 jobs por sub-grupo
+MAX_EQUIPES_POR_SUBGRUPO = 4
 
 # === THRESHOLDS DE LOGGING ===
 # Exibe warning quando pool de candidatos é maior que este valor
-POOL_WARNING_THRESHOLD = 100
+POOL_WARNING_THRESHOLD = 80
 
 # === AJUSTES RECOMENDADOS POR CENÁRIO ===
 """

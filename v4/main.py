@@ -169,10 +169,65 @@ def _solve_group_vroom(
 ) -> Tuple[pd.DataFrame, Set[str]]:
     """
     Resolve um grupo de equipes que têm o MESMO inicio_turno usando VROOM multi-veículos.
+    
+    Se o grupo for muito grande (>6 equipes), divide em sub-grupos para evitar sobrecarga do VROOM.
 
     Retorna:
       df_result_group: DataFrame com atribuições desse grupo
       assigned_numos: set de numos atribuídos (para remover do backlog)
+    """
+    if eq_group.empty:
+        return pd.DataFrame(), set()
+
+    group_ini = pd.to_datetime(eq_group["inicio_turno"].iloc[0], errors="coerce")
+    if pd.isna(group_ini):
+        return pd.DataFrame(), set()
+    
+    # Se grupo muito grande, dividir em sub-grupos de até 6 equipes
+    MAX_EQUIPES_POR_SUBGRUPO = 6
+    if len(eq_group) > MAX_EQUIPES_POR_SUBGRUPO:
+        log(f"   ⚙️  Grupo grande ({len(eq_group)} equipes) - Dividindo em sub-grupos de {MAX_EQUIPES_POR_SUBGRUPO}")
+        all_results = []
+        all_assigned = set()
+        
+        for i in range(0, len(eq_group), MAX_EQUIPES_POR_SUBGRUPO):
+            sub_group = eq_group.iloc[i:i+MAX_EQUIPES_POR_SUBGRUPO]
+            log(f"      Sub-grupo {i//MAX_EQUIPES_POR_SUBGRUPO + 1}: {len(sub_group)} equipes")
+            
+            df_sub_res, assigned_sub = _solve_group_vroom_single(
+                sub_group, pend_tec_global, pend_com_global, limite_por_equipe
+            )
+            
+            if not df_sub_res.empty:
+                all_results.append(df_sub_res)
+                all_assigned.update(assigned_sub)
+                
+                # Remove os atribuídos do backlog para os próximos sub-grupos
+                if "numos" in pend_tec_global.columns:
+                    pend_tec_global = pend_tec_global[
+                        ~pend_tec_global["numos"].astype(str).isin(assigned_sub)
+                    ]
+                if "numos" in pend_com_global.columns:
+                    pend_com_global = pend_com_global[
+                        ~pend_com_global["numos"].astype(str).isin(assigned_sub)
+                    ]
+        
+        if all_results:
+            return pd.concat(all_results, ignore_index=True), all_assigned
+        else:
+            return pd.DataFrame(), set()
+    
+    # Grupo pequeno - processar normalmente
+    return _solve_group_vroom_single(eq_group, pend_tec_global, pend_com_global, limite_por_equipe)
+
+def _solve_group_vroom_single(
+    eq_group: pd.DataFrame,
+    pend_tec_global: pd.DataFrame,
+    pend_com_global: pd.DataFrame,
+    limite_por_equipe: int,
+) -> Tuple[pd.DataFrame, Set[str]]:
+    """
+    Resolve um sub-grupo de equipes usando VROOM multi-veículos (implementação interna).
     """
     if eq_group.empty:
         return pd.DataFrame(), set()

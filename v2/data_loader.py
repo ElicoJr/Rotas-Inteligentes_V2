@@ -159,5 +159,7 @@ def prepare_pendencias():
     # remover linhas sem coordenadas válidas
     tec = tec.dropna(subset=["latitude","longitude"])
     com = com.dropna(subset=["latitude","longitude"])
+    com.to_parquet('/data/ServicosComerciais.parquet', index=False)
+    tec.to_parquet('/data/ServicosTecnicos.parquet', index=False)
 
     return tec.reset_index(drop=True), com.reset_index(drop=True)

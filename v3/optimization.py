@@ -379,10 +379,9 @@ class MetaHeuristicaV3:
         if self.pool_base.empty:
             return None
 
-        dia = pd.to_datetime(self.equipe.get("dt_ref", self.equipe["inicio_turno"])).normalize()
-        pool = self.pool_base[self.pool_base["dt_ref"] == dia].reset_index(drop=True)
-        if pool.empty:
-            return None
+        # Agora NÃO filtramos mais por dt_ref == dia: queremos permitir backlog de dias anteriores,
+        # desde que datasol < inicio_turno (feito a seguir).
+        pool = self.pool_base.reset_index(drop=True)
 
         elig = pd.to_datetime(pool.get("datasol", pd.NaT), errors="coerce")
         pool = pool[elig < self.turno_ini].reset_index(drop=True)
@@ -462,10 +461,8 @@ class MetaHeuristicaV3:
         return {"resp": final}
 
 
-# ===== Helpers ETA/ETD =====
-
+# ===== Helpers ETA/ETD ===== (iguais à versão anterior)
 def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
-    """Aplica a janela de pausa a um intervalo de tempo (usado em fallbacks)."""
     t = pd.to_datetime(t_cursor, errors="coerce")
     try:
         dur = int(dur_seconds or 0)
@@ -486,11 +483,9 @@ def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
 
     t_end = t + pd.to_timedelta(dur, unit="s")
 
-    # totalmente antes ou depois da pausa
     if t_end <= pausa_ini or t >= pausa_fim:
         return t_end
 
-    # começa antes da pausa e cruza o início
     if t < pausa_ini < t_end:
         before = (pausa_ini - t).total_seconds()
         if dur <= before:
@@ -498,7 +493,6 @@ def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
         remaining = dur - int(before)
         return pausa_fim + pd.to_timedelta(remaining, unit="s")
 
-    # começa dentro da pausa
     if pausa_ini <= t < pausa_fim:
         return pausa_fim + pd.to_timedelta(dur, unit="s")
 
@@ -506,7 +500,6 @@ def _apply_pause(t_cursor, dur_seconds, pausa_ini=None, pausa_fim=None):
 
 
 def _haversine_travel_seconds(lon1, lat1, lon2, lat2, vel_kmh: float = 30.0) -> int:
-    """Tempo de deslocamento aproximado (segundos) entre dois pontos por Haversine."""
     import math
 
     if (lon1, lat1) == (lon2, lat2):
@@ -520,17 +513,13 @@ def _haversine_travel_seconds(lon1, lat1, lon2, lat2, vel_kmh: float = 30.0) -> 
         math.sin(dphi / 2) ** 2
         + math.cos(phi1) * math.cos(phi2) * math.sin(dlamb / 2) ** 2
     )
-    dist = 2 * R * math.asin(math.sqrt(a))  # metros
+    dist = 2 * R * math.asin(math.sqrt(a))
 
     v_ms = max(vel_kmh, 1e-3) * 1000 / 3600.0
     return int(dist / v_ms) if v_ms > 0 else 0
 
 
 def _osrm_eta_etd(osrm_client, df_jobs_tagged, inicio_turno_pvh, lon_e, lat_e, pausa_ini=None, pausa_fim=None):
-    """
-    Calcula chegada/fim de cada OS + chegada à base, usando OSRM.
-    Se o OSRM retornar 0/None para alguma perna, usa Haversine como fallback.
-    """
     for c in ["dth_chegada_estimada", "dth_final_estimada", "fim_turno_estimado"]:
         if c not in df_jobs_tagged.columns:
             df_jobs_tagged[c] = pd.NaT
@@ -543,7 +532,7 @@ def _osrm_eta_etd(osrm_client, df_jobs_tagged, inicio_turno_pvh, lon_e, lat_e, p
     ]
     coords.append((lon_e, lat_e))
 
-    leg_durs, _ = osrm_client.route_legs_durations(coords)  # seg/perna
+    leg_durs, _ = osrm_client.route_legs_durations(coords)
     t_cursor = pd.to_datetime(inicio_turno_pvh, errors="coerce")
 
     leg_idx = 0
@@ -587,9 +576,6 @@ def _haversine_eta_etd(
     pausa_ini=None,
     pausa_fim=None,
 ):
-    """
-    Versão completamente baseada em Haversine (sem OSRM), usada como fallback geral.
-    """
     for c in ["dth_chegada_estimada", "dth_final_estimada", "fim_turno_estimado"]:
         if c not in df_jobs_tagged.columns:
             df_jobs_tagged[c] = pd.NaT

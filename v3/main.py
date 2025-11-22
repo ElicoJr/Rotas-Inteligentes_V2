@@ -81,17 +81,17 @@ def _ensure_result_schema(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _tem_pendencias_atendiveis(
-    pend_tec_dia: pd.DataFrame,
-    pend_com_dia: pd.DataFrame,
+    pend_tec_global: pd.DataFrame,
+    pend_com_global: pd.DataFrame,
     ini_turno_min: pd.Timestamp,
 ) -> bool:
     """Retorna True se ainda existem OS com datasol <= menor início de turno do dia."""
-    if not pend_tec_dia.empty:
-        ds_tec = pd.to_datetime(pend_tec_dia["datasol"], errors="coerce")
+    if not pend_tec_global.empty:
+        ds_tec = pd.to_datetime(pend_tec_global["datasol"], errors="coerce")
         if (ds_tec <= ini_turno_min).any():
             return True
-    if not pend_com_dia.empty:
-        ds_com = pd.to_datetime(pend_com_dia["datasol"], errors="coerce")
+    if not pend_com_global.empty:
+        ds_com = pd.to_datetime(pend_com_global["datasol"], errors="coerce")
         if (ds_com <= ini_turno_min).any():
             return True
     return False
@@ -107,8 +107,8 @@ def simular_v3(
     """Simulação V3:
     - Equipe inicia/termina na própria base (base_lon/base_lat).
     - Cada OS (numos) é atendida no máximo uma vez.
-    - Enquanto houver OS atendíveis (datasol <= inicio_turno_min) e alguma equipe tiver capacidade,
-      o algoritmo tenta atribuir OS (em várias rodadas).
+    - Backlog: OS não atribuídas com datasol <= inicio_turno_min são herdadas para os próximos dias.
+    - Enquanto houver OS atendíveis e alguma equipe tiver capacidade, o algoritmo tenta atribuir OS (rodadas).
     - Deslocamento prioritário via VROOM; fallback OSRM; último recurso Haversine.
     """
 
@@ -122,6 +122,10 @@ def simular_v3(
     pend_tec_global = df_te.copy()
     pend_com_global = df_co.copy()
 
+    # Normaliza dt_ref nas pendências para comparação com dia
+    pend_tec_global["dt_ref"] = pd.to_datetime(pend_tec_global["dt_ref"], errors="coerce").dt.normalize()
+    pend_com_global["dt_ref"] = pd.to_datetime(pend_com_global["dt_ref"], errors="coerce").dt.normalize()
+
     for i, dia in enumerate(dias, 1):
         log("=" * 120)
         log(f"🗓️  Dia {i}/{len(dias)} — {dia.date()}")
@@ -134,30 +138,56 @@ def simular_v3(
             log("⚠️  Nenhuma equipe para este dia.")
             continue
 
-        # snapshot de pendências do dia (antes de qualquer atribuição)
-        pend_tec_dia = pend_tec_global[pend_tec_global["dt_ref"] == dia].copy()
-        pend_com_dia = pend_com_global[pend_com_global["dt_ref"] == dia].copy()
+        # ordenar equipes por início de turno para processar em ordem temporal
+        eq_dia = eq_dia.sort_values("inicio_turno")
+        ini_turno_min = pd.to_datetime(eq_dia["inicio_turno"], errors="coerce").min()
 
-        num_pend_tec = len(pend_tec_dia)
-        num_pend_com = len(pend_com_dia)
-        num_pend_total = num_pend_tec + num_pend_com
+        # --- Cálculo de pendências novas, backlog e total (apenas para log) ---
+        # novas do dia (dt_ref == dia) e datasol <= inicio_turno_min
+        if not pend_tec_global.empty:
+            ds_tec = pd.to_datetime(pend_tec_global["datasol"], errors="coerce")
+            mask_tec_elig = ds_tec <= ini_turno_min
+            mask_tec_new = mask_tec_elig & (pend_tec_global["dt_ref"] == dia)
+            mask_tec_backlog = mask_tec_elig & (pend_tec_global["dt_ref"] < dia)
+            pend_new_tec = mask_tec_new.sum()
+            pend_backlog_tec = mask_tec_backlog.sum()
+        else:
+            pend_new_tec = pend_backlog_tec = 0
+
+        if not pend_com_global.empty:
+            ds_com = pd.to_datetime(pend_com_global["datasol"], errors="coerce")
+            mask_com_elig = ds_com <= ini_turno_min
+            mask_com_new = mask_com_elig & (pend_com_global["dt_ref"] == dia)
+            mask_com_backlog = mask_com_elig & (pend_com_global["dt_ref"] < dia)
+            pend_new_com = mask_com_new.sum()
+            pend_backlog_com = mask_com_backlog.sum()
+        else:
+            pend_new_com = pend_backlog_com = 0
+
+        # Logs no formato solicitado
+        total_new = pend_new_tec + pend_new_com
+        total_backlog = pend_backlog_tec + pend_backlog_com
+        total_pend = total_new + total_backlog
 
         log(
-            f"📦 Pendências no início do dia: total={num_pend_total} "
-            f"(Tec={num_pend_tec} | Com={num_pend_com})"
+            f"📦 Pendências no início do dia: total={total_new} "
+            f"(Tec={pend_new_tec} | Com={pend_new_com})"
+        )
+        log(
+            f"📦 Pendências backlog: total={total_backlog} "
+            f"(Tec={pend_backlog_tec} | Com={pend_backlog_com})"
+        )
+        log(
+            f"📦 Total Pendencias: total={total_pend} "
+            f"(Tec={pend_new_tec + pend_backlog_tec} | Com={pend_new_com + pend_backlog_com})"
         )
 
         atribs_dia: List[pd.DataFrame] = []
 
-        # ordenar equipes por início de turno para processar em ordem temporal
-        eq_dia = eq_dia.sort_values("inicio_turno")
         # mapa equipe -> OS já atribuídas (para respeitar limite diário)
         atrib_por_equipe: Dict[str, int] = {
             str(row["nome"]): 0 for _, row in eq_dia.iterrows()
         }
-
-        # menor início de turno do dia (para teste rápido de datasol <= inicio_turno)
-        ini_turno_min = pd.to_datetime(eq_dia["inicio_turno"], errors="coerce").min()
 
         rodada = 0
         while True:
@@ -165,7 +195,7 @@ def simular_v3(
             any_assigned_this_round = False
 
             # condição de parada: não há mais OS atendíveis para este dia
-            if not _tem_pendencias_atendiveis(pend_tec_dia, pend_com_dia, ini_turno_min):
+            if not _tem_pendencias_atendiveis(pend_tec_global, pend_com_global, ini_turno_min):
                 break
 
             # condição de parada: nenhuma equipe tem capacidade restante
@@ -176,16 +206,16 @@ def simular_v3(
 
             for _, equipe_row in eq_dia.iterrows():
                 nome_eq = str(equipe_row.get("nome", "N/D"))
+                ini_turno_eq = pd.to_datetime(equipe_row.get("inicio_turno"), errors="coerce")
                 ja_atribuidas = atrib_por_equipe.get(nome_eq, 0)
                 capacidade_restante = limite_por_equipe - ja_atribuidas
 
                 if capacidade_restante <= 0:
-                    # esta equipe já atingiu seu limite diário
                     continue
 
-                # se não há mais pendências no dia, podemos sair
-                if pend_tec_dia.empty and pend_com_dia.empty:
-                    break
+                # snapshot atual das pendências globais para esta equipe
+                pend_tec_dia = pend_tec_global.copy()
+                pend_com_dia = pend_com_global.copy()
 
                 mh = MetaHeuristicaV3(equipe_row, pend_tec_dia, pend_com_dia, capacidade_restante)
                 try:
@@ -195,7 +225,6 @@ def simular_v3(
                     continue
 
                 if not sol or not isinstance(sol.get("resp"), pd.DataFrame) or sol["resp"].empty:
-                    # nada atribuído para esta equipe nesta rodada
                     continue
 
                 df_resp = sol["resp"].copy()
@@ -218,16 +247,14 @@ def simular_v3(
                     else 0
                 )
 
-                log(
-                    f"🚚 Equipe {nome_eq} (rodada {rodada}) → {qtd} serviços atribuídos "
-                    f"(Tec={num_tec_eq} | Com={num_com_eq})"
-                )
-
+                # LOG no formato solicitado para equipe:
+                # 🚚 PVLPL46 | {inicio_turno} → 15 OS (Tec=7 | Com=8) | 📦→ 22 (Tec=7 | Com=15)
                 atribs_dia.append(df_resp)
                 any_assigned_this_round = True
                 atrib_por_equipe[nome_eq] = ja_atribuidas + qtd
 
-                # Remover OS atribuídas (numos) dos pools do dia e globais
+                # Remover OS atribuídas (numos) dos pools globais
+                rest_tec = rest_com = 0
                 if "numos" in df_resp.columns:
                     atendidos = (
                         df_resp["numos"]
@@ -238,17 +265,6 @@ def simular_v3(
                     )
 
                     if atendidos:
-                        # remover dos pools do DIA
-                        if "numos" in pend_tec_dia.columns:
-                            pend_tec_dia = pend_tec_dia[
-                                ~pend_tec_dia["numos"].astype(str).isin(atendidos)
-                            ]
-                        if "numos" in pend_com_dia.columns:
-                            pend_com_dia = pend_com_dia[
-                                ~pend_com_dia["numos"].astype(str).isin(atendidos)
-                            ]
-
-                        # remover dos pools GLOBAIS (para não voltar em outros dias)
                         if "numos" in pend_tec_global.columns:
                             pend_tec_global = pend_tec_global[
                                 ~pend_tec_global["numos"].astype(str).isin(atendidos)
@@ -258,13 +274,14 @@ def simular_v3(
                                 ~pend_com_global["numos"].astype(str).isin(atendidos)
                             ]
 
-                # LOG de pendências restantes após essa equipe
-                rest_tec = len(pend_tec_dia)
-                rest_com = len(pend_com_dia)
+                rest_tec = len(pend_tec_global)
+                rest_com = len(pend_com_global)
                 rest_tot = rest_tec + rest_com
+
                 log(
-                    f"📦 Pendências restantes após equipe {nome_eq}: "
-                    f"total={rest_tot} (Tec={rest_tec} | Com={rest_com})"
+                    f"🚚 {nome_eq} | {ini_turno_eq} → {qtd} OS "
+                    f"(Tec={num_tec_eq} | Com={num_com_eq}) | "
+                    f"📦→ {rest_tot} (Tec={rest_tec} | Com={rest_com})"
                 )
 
             # se, após percorrer todas as equipes nesta rodada, ninguém recebeu OS,
@@ -317,6 +334,7 @@ def main() -> None:
 
     log("\n✅ PROCESSO V3 FINALIZADO COM SUCESSO!")
     log(f"📂 Resultados em: {RESULTS_DIR.resolve()}")
+    log(f"🚀 Simulação V3 finalizada às {datetime.now():%H:%M:%S}")
 
 
 if __name__ == "__main__":

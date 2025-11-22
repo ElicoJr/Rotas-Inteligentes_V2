@@ -27,6 +27,7 @@ vroom-local/osrm-data/norte-latest.osrm.turn_duration_penalties
 vroom-local/osrm-data/norte-latest.osrm.turn_penalties_index
 vroom-local/osrm-data/norte-latest.osrm.turn_weight_penalties
 results/*
+results_v3/*
 __pycache__/*
 v2/__pycache__/*
 data/*-e 

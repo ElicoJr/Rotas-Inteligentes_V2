@@ -186,13 +186,13 @@ def _solve_group_vroom(
     
     # Se grupo muito grande, dividir em sub-grupos
     if len(eq_group) > v4_config.MAX_EQUIPES_POR_SUBGRUPO:
-        log(f"   ⚙️  Grupo grande ({len(eq_group)} equipes) - Dividindo em sub-grupos de {MAX_EQUIPES_POR_SUBGRUPO}")
+        log(f"   ⚙️  Grupo grande ({len(eq_group)} equipes) - Dividindo em sub-grupos de {v4_config.MAX_EQUIPES_POR_SUBGRUPO}")
         all_results = []
         all_assigned = set()
         
-        for i in range(0, len(eq_group), MAX_EQUIPES_POR_SUBGRUPO):
-            sub_group = eq_group.iloc[i:i+MAX_EQUIPES_POR_SUBGRUPO]
-            log(f"      Sub-grupo {i//MAX_EQUIPES_POR_SUBGRUPO + 1}: {len(sub_group)} equipes")
+        for i in range(0, len(eq_group), v4_config.MAX_EQUIPES_POR_SUBGRUPO):
+            sub_group = eq_group.iloc[i:i+v4_config.MAX_EQUIPES_POR_SUBGRUPO]
+            log(f"      Sub-grupo {i//v4_config.MAX_EQUIPES_POR_SUBGRUPO + 1}: {len(sub_group)} equipes")
             
             df_sub_res, assigned_sub = _solve_group_vroom_single(
                 sub_group, pend_tec_global, pend_com_global, limite_por_equipe

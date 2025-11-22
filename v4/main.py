@@ -298,6 +298,11 @@ def _solve_group_vroom_single(
 
     if not jobs:
         return pd.DataFrame(), set()
+    
+    # Validação: se muito poucos jobs para os veículos, pular
+    if len(jobs) < v4_config.MIN_JOBS_POR_GRUPO:
+        log(f"   ⏭️  Pulando: apenas {len(jobs)} job(s) para {n_veic} veículos (mínimo: {v4_config.MIN_JOBS_POR_GRUPO})")
+        return pd.DataFrame(), set()
 
     # Monta veículos VROOM com capacidade limitada
     vehicles = []

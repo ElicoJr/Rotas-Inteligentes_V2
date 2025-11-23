@@ -46,3 +46,4 @@ shp_localidade/*
 *.code-snippets
 data/atendTec.parquet
 data/ServCom.parquet
+vroom-local/conf/access.log

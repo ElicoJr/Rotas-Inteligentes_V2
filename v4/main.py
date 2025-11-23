@@ -429,13 +429,12 @@ def _solve_group_vroom_single(
         df_assigned[col] = df_assigned["equipe"].map(lambda eq: equipe_to_info.get(eq, {}).get(col))
     
     # Calcular chegada_base (fim do último serviço + tempo de volta à base)
-    # Usa dth_final_estimada como proxy (pode refinar depois)
+    # Usa fim_turno_estimado como proxy
     df_assigned["chegada_base"] = df_assigned["fim_turno_estimado"]
     
-    # Extrair distancia e duracao do VROOM (se disponível nos routes)
-    # Por enquanto, deixar vazios ou calcular depois se necessário
-    df_assigned["distancia_vroom"] = pd.NA
-    df_assigned["duracao_vroom"] = pd.NA
+    # Aplicar distância e duração do VROOM
+    df_assigned["distancia_vroom"] = df_assigned["job_id_vroom"].map(job_to_distance)
+    df_assigned["duracao_vroom"] = df_assigned["job_id_vroom"].map(job_to_duration)
 
     return df_assigned, set(df_assigned["numos"].astype(str))
 

@@ -356,17 +356,28 @@ def _solve_group_vroom_single(
     job_to_equipe: Dict[int, str] = {}
     job_to_arrival: Dict[int, pd.Timestamp] = {}
     job_to_fim_turno: Dict[int, pd.Timestamp] = {}
+    job_to_distance: Dict[int, float] = {}
+    job_to_duration: Dict[int, float] = {}
 
     for route in routes:
         v_id = route.get("vehicle")
         equipe_nome = veh_id_to_nome.get(v_id, "N/D")
         steps = route.get("steps", [])
         route_end_arr_s = route.get("arrival")
+        route_distance = route.get("distance", 0)  # metros
+        route_duration = route.get("duration", 0)  # segundos
+        
         end_dt = (
             group_ini + pd.to_timedelta(int(route_end_arr_s), unit="s")
             if route_end_arr_s is not None
             else pd.NaT
         )
+        
+        # Distribuir distância e duração proporcionalmente aos jobs
+        job_count_in_route = sum(1 for st in steps if st.get("type") == "job")
+        dist_per_job = route_distance / job_count_in_route if job_count_in_route > 0 else 0
+        dur_per_job = route_duration / job_count_in_route if job_count_in_route > 0 else 0
+        
         for st in steps:
             if st.get("type") == "job":
                 jid = int(st.get("job"))
@@ -377,6 +388,8 @@ def _solve_group_vroom_single(
                 job_to_equipe[jid] = equipe_nome
                 job_to_arrival[jid] = arr_dt
                 job_to_fim_turno[jid] = end_dt
+                job_to_distance[jid] = dist_per_job / 1000.0  # converter para km
+                job_to_duration[jid] = dur_per_job / 60.0  # converter para minutos
 
     if not job_to_equipe:
         return pd.DataFrame(), set()
@@ -394,6 +407,34 @@ def _solve_group_vroom_single(
 
     df_assigned["fim_turno_estimado"] = df_assigned["job_id_vroom"].map(job_to_fim_turno)
     df_assigned["eta_source"] = "VROOM"
+    
+    # Preencher informações da equipe (inicio_turno, fim_turno, pausas, base)
+    equipe_to_info = {}
+    for _, erow in eq_group.iterrows():
+        equipe_nome = str(erow["nome"])
+        equipe_to_info[equipe_nome] = {
+            "inicio_turno": pd.to_datetime(erow["inicio_turno"], errors="coerce"),
+            "fim_turno": pd.to_datetime(erow["fim_turno"], errors="coerce"),
+            "dthpausa_ini": pd.to_datetime(erow.get("dthpausa_ini"), errors="coerce"),
+            "dthpausa_fim": pd.to_datetime(erow.get("dthpausa_fim"), errors="coerce"),
+            "base_lon": erow.get("base_lon") if pd.notna(erow.get("base_lon")) else config.BASE_LON,
+            "base_lat": erow.get("base_lat") if pd.notna(erow.get("base_lat")) else config.BASE_LAT,
+            "dthaps_ini": pd.to_datetime(erow.get("dthaps_ini"), errors="coerce"),
+            "dthaps_fim_ajustado": pd.to_datetime(erow.get("dthaps_fim_ajustado"), errors="coerce"),
+        }
+    
+    # Aplicar informações da equipe a cada linha
+    for col in ["inicio_turno", "fim_turno", "dthpausa_ini", "dthpausa_fim", 
+                "base_lon", "base_lat", "dthaps_ini", "dthaps_fim_ajustado"]:
+        df_assigned[col] = df_assigned["equipe"].map(lambda eq: equipe_to_info.get(eq, {}).get(col))
+    
+    # Calcular chegada_base (fim do último serviço + tempo de volta à base)
+    # Usa fim_turno_estimado como proxy
+    df_assigned["chegada_base"] = df_assigned["fim_turno_estimado"]
+    
+    # Aplicar distância e duração do VROOM
+    df_assigned["distancia_vroom"] = df_assigned["job_id_vroom"].map(job_to_distance)
+    df_assigned["duracao_vroom"] = df_assigned["job_id_vroom"].map(job_to_duration)
 
     return df_assigned, set(df_assigned["numos"].astype(str))
 

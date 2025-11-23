@@ -394,6 +394,35 @@ def _solve_group_vroom_single(
 
     df_assigned["fim_turno_estimado"] = df_assigned["job_id_vroom"].map(job_to_fim_turno)
     df_assigned["eta_source"] = "VROOM"
+    
+    # Preencher informações da equipe (inicio_turno, fim_turno, pausas, base)
+    equipe_to_info = {}
+    for _, erow in eq_group.iterrows():
+        equipe_nome = str(erow["nome"])
+        equipe_to_info[equipe_nome] = {
+            "inicio_turno": pd.to_datetime(erow["inicio_turno"], errors="coerce"),
+            "fim_turno": pd.to_datetime(erow["fim_turno"], errors="coerce"),
+            "dthpausa_ini": pd.to_datetime(erow.get("dthpausa_ini"), errors="coerce"),
+            "dthpausa_fim": pd.to_datetime(erow.get("dthpausa_fim"), errors="coerce"),
+            "base_lon": erow.get("base_lon") if pd.notna(erow.get("base_lon")) else config.BASE_LON,
+            "base_lat": erow.get("base_lat") if pd.notna(erow.get("base_lat")) else config.BASE_LAT,
+            "dthaps_ini": pd.to_datetime(erow.get("dthaps_ini"), errors="coerce"),
+            "dthaps_fim_ajustado": pd.to_datetime(erow.get("dthaps_fim_ajustado"), errors="coerce"),
+        }
+    
+    # Aplicar informações da equipe a cada linha
+    for col in ["inicio_turno", "fim_turno", "dthpausa_ini", "dthpausa_fim", 
+                "base_lon", "base_lat", "dthaps_ini", "dthaps_fim_ajustado"]:
+        df_assigned[col] = df_assigned["equipe"].map(lambda eq: equipe_to_info.get(eq, {}).get(col))
+    
+    # Calcular chegada_base (fim do último serviço + tempo de volta à base)
+    # Usa dth_final_estimada como proxy (pode refinar depois)
+    df_assigned["chegada_base"] = df_assigned["fim_turno_estimado"]
+    
+    # Extrair distancia e duracao do VROOM (se disponível nos routes)
+    # Por enquanto, deixar vazios ou calcular depois se necessário
+    df_assigned["distancia_vroom"] = pd.NA
+    df_assigned["duracao_vroom"] = pd.NA
 
     return df_assigned, set(df_assigned["numos"].astype(str))
 

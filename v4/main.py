@@ -356,17 +356,28 @@ def _solve_group_vroom_single(
     job_to_equipe: Dict[int, str] = {}
     job_to_arrival: Dict[int, pd.Timestamp] = {}
     job_to_fim_turno: Dict[int, pd.Timestamp] = {}
+    job_to_distance: Dict[int, float] = {}
+    job_to_duration: Dict[int, float] = {}
 
     for route in routes:
         v_id = route.get("vehicle")
         equipe_nome = veh_id_to_nome.get(v_id, "N/D")
         steps = route.get("steps", [])
         route_end_arr_s = route.get("arrival")
+        route_distance = route.get("distance", 0)  # metros
+        route_duration = route.get("duration", 0)  # segundos
+        
         end_dt = (
             group_ini + pd.to_timedelta(int(route_end_arr_s), unit="s")
             if route_end_arr_s is not None
             else pd.NaT
         )
+        
+        # Distribuir distância e duração proporcionalmente aos jobs
+        job_count_in_route = sum(1 for st in steps if st.get("type") == "job")
+        dist_per_job = route_distance / job_count_in_route if job_count_in_route > 0 else 0
+        dur_per_job = route_duration / job_count_in_route if job_count_in_route > 0 else 0
+        
         for st in steps:
             if st.get("type") == "job":
                 jid = int(st.get("job"))
@@ -377,6 +388,8 @@ def _solve_group_vroom_single(
                 job_to_equipe[jid] = equipe_nome
                 job_to_arrival[jid] = arr_dt
                 job_to_fim_turno[jid] = end_dt
+                job_to_distance[jid] = dist_per_job / 1000.0  # converter para km
+                job_to_duration[jid] = dur_per_job / 60.0  # converter para minutos
 
     if not job_to_equipe:
         return pd.DataFrame(), set()
